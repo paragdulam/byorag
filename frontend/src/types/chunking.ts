@@ -14,3 +14,7 @@ export interface ChunkRunResponse {
   extractionFailed: boolean
   result: ChunkingResult | null
 }
+
+export interface ChunkProgressEvent {
+  percent: number
+}

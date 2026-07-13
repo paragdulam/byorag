@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { FixedSizeChunkingScreen } from '../../src/components/experiments/FixedSizeChunkingScreen'
+import { FixedSizeChunkingScreen } from '../../src/components/chunking/FixedSizeChunkingScreen'
 import { useFixedSizeChunking } from '../../src/hooks/useFixedSizeChunking'
 import type { UseFixedSizeChunking } from '../../src/hooks/useFixedSizeChunking'
 import type { SourceDocument } from '../../src/types/sourceDocument'
@@ -26,7 +26,9 @@ function mockState(overrides: Partial<UseFixedSizeChunking> = {}): UseFixedSizeC
     documents: [makeDoc()],
     isLoadingDocuments: false,
     status: 'idle',
+    progressPercent: 0,
     result: null,
+    hasSucceededOnce: false,
     run: vi.fn(),
     ...overrides,
   }
@@ -34,7 +36,43 @@ function mockState(overrides: Partial<UseFixedSizeChunking> = {}): UseFixedSizeC
   return state
 }
 
-describe('FixedSizeChunkingScreen — document selection and running (US2)', () => {
+describe('FixedSizeChunkingScreen — horizontal control bar (US1)', () => {
+  it('renders Select Document, Chunk Size, Overlap, and Separators in one bar, in that order, below the sub-header', () => {
+    mockState()
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByText(/configure how documents are partitioned/i)).toBeInTheDocument()
+
+    const bar = screen.getByTestId('chunking-control-bar')
+    const text = bar.textContent ?? ''
+    const docIdx = text.indexOf('Select Document')
+    const chunkIdx = text.indexOf('Chunk Size')
+    const overlapIdx = text.indexOf('Overlap')
+    const separatorsIdx = text.indexOf('Separators')
+
+    expect(docIdx).toBeGreaterThanOrEqual(0)
+    expect(chunkIdx).toBeGreaterThan(docIdx)
+    expect(overlapIdx).toBeGreaterThan(chunkIdx)
+    expect(separatorsIdx).toBeGreaterThan(overlapIdx)
+
+    expect(within(bar).getByLabelText(/select document/i)).toBeInTheDocument()
+    expect(within(bar).getByLabelText(/chunk size/i)).toBeInTheDocument()
+    expect(within(bar).getByLabelText(/^overlap$/i)).toBeInTheDocument()
+    expect(within(bar).getByRole('button', { name: '"\\n\\n"' })).toBeInTheDocument()
+  })
+
+  it('does not render any algorithm-selection control anywhere on the screen', () => {
+    mockState()
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.queryByLabelText(/recursive character/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/semantic chunking/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^algorithm$/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument()
+  })
+
   it('lists uploaded documents in the picker', () => {
     mockState({ documents: [makeDoc({ id: 'a.pdf', name: 'a.pdf' })] })
 
@@ -52,7 +90,7 @@ describe('FixedSizeChunkingScreen — document selection and running (US2)', () 
     expect(screen.queryByLabelText(/chunk size/i)).not.toBeInTheDocument()
   })
 
-  it('calls run with the selected document id and chunk size when triggered', async () => {
+  it('calls run with the selected document id and chunk size when Re-calculate Chunks is clicked', async () => {
     const state = mockState()
 
     render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
@@ -123,41 +161,6 @@ describe('FixedSizeChunkingScreen — document selection and running (US2)', () 
 
     expect(screen.getByText(/more chunks exist/i)).toBeInTheDocument()
   })
-})
-
-describe('FixedSizeChunkingScreen — inert reference-design controls (US3)', () => {
-  it('shows the alternate algorithm options, overlap control, and separator options', () => {
-    mockState()
-
-    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
-
-    expect(screen.getByLabelText(/recursive character/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/semantic chunking/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/^fixed size$/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/overlap/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '"\\n\\n"' })).toBeInTheDocument()
-  })
-
-  it('does not change the chunk size input, call run, or alter results when the inert controls are used', async () => {
-    const state = mockState({
-      status: 'success',
-      result: {
-        chunks: [{ index: 0, content: 'first chunk text' }],
-        totalChunks: 1,
-        strategy: 'fixed-size',
-        chunkSize: 512,
-      },
-    })
-
-    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
-
-    await userEvent.click(screen.getByLabelText(/recursive character/i))
-    await userEvent.click(screen.getByLabelText(/overlap/i))
-
-    expect(screen.getByLabelText(/chunk size/i)).toHaveValue(512)
-    expect(state.run).not.toHaveBeenCalled()
-    expect(screen.getByText('first chunk text')).toBeInTheDocument()
-  })
 
   it('does not render a Comparison section anywhere on the screen', () => {
     mockState()
@@ -165,5 +168,79 @@ describe('FixedSizeChunkingScreen — inert reference-design controls (US3)', ()
     render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
 
     expect(screen.queryByText(/comparison/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('FixedSizeChunkingScreen — live progress and scroll containment (US2)', () => {
+  it('shows a progress bar reflecting progressPercent while a run is in progress', () => {
+    mockState({ status: 'running', progressPercent: 45 })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    const progressBar = screen.getByRole('progressbar')
+    expect(progressBar).toHaveAttribute('aria-valuenow', '45')
+  })
+
+  it('hides the progress bar once a terminal status is reached', () => {
+    mockState({
+      status: 'success',
+      progressPercent: 100,
+      result: { chunks: [], totalChunks: 0, strategy: 'fixed-size', chunkSize: 50 },
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
+
+  it('renders the chunk list in an independently-scrollable container', () => {
+    mockState({
+      status: 'success',
+      result: {
+        chunks: [{ index: 0, content: 'first chunk text' }],
+        totalChunks: 1,
+        strategy: 'fixed-size',
+        chunkSize: 50,
+      },
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    const chunkList = screen.getByTestId('chunk-list')
+    expect(chunkList.className).toMatch(/overflow-y-auto/)
+    expect(chunkList.className).toMatch(/flex-1/)
+  })
+})
+
+describe('FixedSizeChunkingScreen — bottom action bar and Move to Embeddings gating (US3)', () => {
+  it('shows exactly two buttons in the bottom bar', () => {
+    mockState()
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: /re-calculate chunks/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /move to embeddings/i })).toBeInTheDocument()
+  })
+
+  it('disables Move to Embeddings until a chunk run has succeeded once', () => {
+    mockState({ hasSucceededOnce: false })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: /move to embeddings/i })).toBeDisabled()
+  })
+
+  it('enables Move to Embeddings once hasSucceededOnce is true and navigates to embeddings when clicked', async () => {
+    const onNavigate = vi.fn()
+    mockState({ hasSucceededOnce: true })
+
+    render(<FixedSizeChunkingScreen onNavigate={onNavigate} />)
+
+    const button = screen.getByRole('button', { name: /move to embeddings/i })
+    expect(button).toBeEnabled()
+
+    await userEvent.click(button)
+
+    expect(onNavigate).toHaveBeenCalledWith('embeddings')
   })
 })

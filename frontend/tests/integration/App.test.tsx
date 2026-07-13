@@ -13,10 +13,20 @@ describe('App navigation', () => {
   it('renders the Fixed Size Chunking screen after navigating there from the sidebar', async () => {
     render(<App />)
 
-    await userEvent.click(screen.getByText('EXPERIMENTS'))
+    await userEvent.click(screen.getByText('CHUNKING'))
     await userEvent.click(screen.getByText('FIXED SIZE CHUNKING'))
 
     expect(screen.getByRole('heading', { name: 'Fixed Size Chunking' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Data Sources' })).not.toBeInTheDocument()
+  })
+
+  it('renders the Embeddings placeholder screen after navigating there from the sidebar', async () => {
+    render(<App />)
+
+    await userEvent.click(screen.getByText('CHUNKING'))
+    await userEvent.click(screen.getByText('EMBEDDINGS'))
+
+    expect(screen.getByRole('heading', { name: 'Embeddings' })).toBeInTheDocument()
+    expect(screen.getByText(/coming soon/i)).toBeInTheDocument()
   })
 })

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-export type ScreenId = 'sources' | 'fixed-size-chunking'
+export type ScreenId = 'sources' | 'fixed-size-chunking' | 'embeddings'
 
 interface SubNavItem {
   label: string
@@ -16,9 +16,12 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { label: 'Sources', screen: 'sources' },
   {
-    label: 'Experiments',
-    subItems: [{ label: 'Fixed Size Chunking', screen: 'fixed-size-chunking' }],
+    label: 'Chunking',
+    subItems: [
+      { label: 'Fixed Size Chunking', screen: 'fixed-size-chunking' },
+    ],
   },
+  { label: 'Embeddings', screen: 'embeddings' },
   { label: 'Playground' },
   { label: 'Vector View' },
   { label: 'Logs' },
