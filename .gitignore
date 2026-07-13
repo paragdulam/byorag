@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Backend-persisted source PDFs (local default storage dir) + backend build artifacts
+pdfs/
+backend/pdfs/
+backend/.venv/
+backend/.pytest_cache/
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
+frontend/playwright-report/
+frontend/test-results/
+frontend/coverage/
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/
+*.log
