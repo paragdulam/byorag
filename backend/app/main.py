@@ -6,8 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.chunking.router import router as chunking_router
 from app.config import ensure_pdfs_dir, settings
 from app.corpora.router import router as corpora_router
-from app.db.base import Base, SessionLocal, check_database_connection, engine
+from app.db.base import Base, SessionLocal, check_database_connection, engine, ensure_vector_extension
 from app.db.legacy_migration import migrate_legacy_pdfs
+from app.embeddings.router import router as embeddings_router
+from app.playground.router import router as playground_router
 from app.sources.router import router as sources_router
 from app.system.router import router as system_router
 
@@ -17,6 +19,7 @@ async def lifespan(app: FastAPI):
     ensure_pdfs_dir()
 
     check_database_connection(engine)
+    ensure_vector_extension(engine)
     Base.metadata.create_all(engine)
 
     with SessionLocal() as db:
@@ -38,3 +41,5 @@ app.include_router(corpora_router)
 app.include_router(sources_router)
 app.include_router(system_router)
 app.include_router(chunking_router)
+app.include_router(embeddings_router)
+app.include_router(playground_router)

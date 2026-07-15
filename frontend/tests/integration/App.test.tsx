@@ -20,13 +20,31 @@ describe('App navigation', () => {
     expect(screen.queryByRole('heading', { name: 'Data Sources' })).not.toBeInTheDocument()
   })
 
-  it('renders the Embeddings placeholder screen after navigating there from the sidebar', async () => {
+  it('renders the Embeddings screen after navigating there from the sidebar', async () => {
     render(<App />)
 
     await userEvent.click(screen.getByText('CHUNKING'))
     await userEvent.click(screen.getByText('EMBEDDINGS'))
 
     expect(screen.getByRole('heading', { name: 'Embeddings' })).toBeInTheDocument()
-    expect(screen.getByText(/coming soon/i)).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Data Sources' })).not.toBeInTheDocument()
+  })
+
+  it('renders the Vector View screen after navigating there from the sidebar', async () => {
+    render(<App />)
+
+    await userEvent.click(screen.getByText('VECTOR VIEW'))
+
+    expect(screen.getByRole('heading', { name: 'Vector View' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Data Sources' })).not.toBeInTheDocument()
+  })
+
+  it('renders the Playground screen after navigating there from the sidebar', async () => {
+    render(<App />)
+
+    await userEvent.click(screen.getByText('PLAYGROUND'))
+
+    expect(screen.getByRole('heading', { name: 'Playground' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Data Sources' })).not.toBeInTheDocument()
   })
 })

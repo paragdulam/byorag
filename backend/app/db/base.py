@@ -33,3 +33,12 @@ def check_database_connection(target_engine: Engine) -> None:
         raise RuntimeError(
             f"Cannot start: database at {target_engine.url!r} is unreachable"
         ) from exc
+
+
+def ensure_vector_extension(target_engine: Engine) -> None:
+    """Creates the `pgvector` extension if it doesn't already exist, so the `Embedding`
+    model's `vector` column type is available before `Base.metadata.create_all` runs
+    (013-bert-pgvector-embeddings research.md §2). Must run before `create_all`."""
+    with target_engine.connect() as connection:
+        connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        connection.commit()

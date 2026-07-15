@@ -12,6 +12,10 @@ dependencies = [
     "pypdf>=5.0",
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.2",
+    "pgvector>=0.3",
+    "transformers>=4.45",
+    "torch>=2.4",
+    "anthropic>=0.40",
 ]
 
 [dependency-groups]

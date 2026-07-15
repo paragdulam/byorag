@@ -5,8 +5,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.chunking import service
-from app.chunking.schemas import ChunkRunResponse, ChunkSaveRequest
+from app.chunking.schemas import ChunkRunResponse, ChunkSaveRequest, SavedChunk, SavedChunksResponse
 from app.db.base import get_db
+from app.db.lookups import get_document_or_none
 
 router = APIRouter(prefix="/api/chunking", tags=["chunking"])
 
@@ -64,3 +65,14 @@ def save_chunking_result(
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save chunks: {exc}") from exc
+
+
+@router.get("/saved-chunks")
+def get_saved_chunks(documentId: str, db: Session = Depends(get_db)) -> SavedChunksResponse:
+    if get_document_or_none(db, documentId) is None:
+        raise HTTPException(status_code=404, detail=f"No document found with id {documentId!r}")
+
+    chunks = service.list_saved_chunks(db, documentId)
+    return SavedChunksResponse(
+        chunks=[SavedChunk(id=c.id, index=c.index, content=c.content) for c in chunks]
+    )

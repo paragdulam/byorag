@@ -27,3 +27,13 @@ class ChunkSaveRequest(BaseModel):
     documentId: str
     chunkSize: int
     overlap: int = 0
+
+
+class SavedChunk(BaseModel):
+    id: str
+    index: int
+    content: str
+
+
+class SavedChunksResponse(BaseModel):
+    chunks: list[SavedChunk]

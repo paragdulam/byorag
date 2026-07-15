@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { useCorpus } from '../../context/CorpusContext'
 
-export type ScreenId = 'corpora' | 'sources' | 'fixed-size-chunking' | 'embeddings'
+export type ScreenId =
+  | 'corpora'
+  | 'sources'
+  | 'fixed-size-chunking'
+  | 'embeddings'
+  | 'vector-view'
+  | 'playground'
 
 interface SubNavItem {
   label: string
@@ -24,8 +30,8 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
   { label: 'Embeddings', screen: 'embeddings' },
-  { label: 'Vector View' },
-  { label: 'Playground' },
+  { label: 'Vector View', screen: 'vector-view' },
+  { label: 'Playground', screen: 'playground' },
   { label: 'Logs' },
 ]
 

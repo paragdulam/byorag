@@ -7,7 +7,7 @@ from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db.base import Base, engine, get_db
+from app.db.base import Base, engine, ensure_vector_extension, get_db
 from app.main import app
 
 
@@ -22,6 +22,7 @@ def pdfs_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _db_schema() -> None:
     """Ensure the schema exists once per test session (app lifespan doesn't run
     under a bare TestClient() — see research.md §10)."""
+    ensure_vector_extension(engine)
     Base.metadata.create_all(engine)
 
 

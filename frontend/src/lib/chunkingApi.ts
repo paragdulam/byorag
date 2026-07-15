@@ -1,8 +1,10 @@
 import type { ChunkProgressEvent, ChunkRunResponse } from '../types/chunking'
+import type { SavedChunk } from '../types/embeddings'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 const CHUNKING_STREAM_ENDPOINT = `${API_BASE_URL}/api/chunking/run/stream`
 const CHUNKING_SAVE_ENDPOINT = `${API_BASE_URL}/api/chunking/save`
+const CHUNKING_SAVED_CHUNKS_ENDPOINT = `${API_BASE_URL}/api/chunking/saved-chunks`
 
 export interface ChunkingStreamHandlers {
   onProgress: (percent: number) => void
@@ -73,4 +75,21 @@ export async function saveChunks(
   }
 
   return (await response.json()) as ChunkRunResponse
+}
+
+/**
+ * Reads a document's currently saved chunks (contracts/embeddings-api.md — added for
+ * 013-bert-pgvector-embeddings). An empty list is a normal response for a document with
+ * nothing saved yet, not an error.
+ */
+export async function listSavedChunks(documentId: string): Promise<SavedChunk[]> {
+  const url = `${CHUNKING_SAVED_CHUNKS_ENDPOINT}?documentId=${encodeURIComponent(documentId)}`
+  const response = await fetch(url)
+
+  if (!response.ok) {
+    throw new Error(`Failed to load saved chunks: ${response.status}`)
+  }
+
+  const body = (await response.json()) as { chunks: SavedChunk[] }
+  return body.chunks
 }

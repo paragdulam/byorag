@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal
 
 from pypdf import PdfReader
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.chunking import strategies  # noqa: F401  (registers "fixed-size" on import)
@@ -132,6 +132,17 @@ def stream_chunking(
             chunkSize=chunk_size,
             overlap=overlap,
         ),
+    )
+
+
+def list_saved_chunks(db: Session, document_id: str) -> list[ChunkRow]:
+    """Returns a document's currently saved `Chunk` rows, in `index` order — an empty
+    list is a normal result for a document with nothing saved yet, not an error
+    (013-bert-pgvector-embeddings data-model.md)."""
+    return list(
+        db.execute(
+            select(ChunkRow).where(ChunkRow.document_id == document_id).order_by(ChunkRow.index)
+        ).scalars()
     )
 
 

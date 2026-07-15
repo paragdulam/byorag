@@ -27,6 +27,34 @@ beforeEach(() => {
         )
       }
 
+      if (url.includes('/api/embeddings/models')) {
+        return new Response(
+          JSON.stringify({ models: [{ id: 'bert', label: 'BERT (bert-base-uncased)' }] }),
+          { status: 200 },
+        )
+      }
+
+      if (url.includes('/api/chunking/saved-chunks')) {
+        return new Response(JSON.stringify({ chunks: [] }), { status: 200 })
+      }
+
+      if (url.includes('/api/embeddings/projection-methods')) {
+        return new Response(
+          JSON.stringify({
+            methods: [
+              { id: 'vector', label: 'Vector', available: true },
+              { id: 'umap', label: 'UMAP', available: false },
+              { id: 'pca', label: 'PCA', available: false },
+            ],
+          }),
+          { status: 200 },
+        )
+      }
+
+      if (url.includes('/api/embeddings/saved')) {
+        return new Response(JSON.stringify({ embeddings: [] }), { status: 200 })
+      }
+
       if (url.includes('/api/system/capacity')) {
         return new Response(
           JSON.stringify({

@@ -118,6 +118,5 @@ test.describe('Chunking Section Redesign & Embeddings Entry Point', () => {
     await moveToEmbeddings.click()
 
     await expect(page.getByRole('heading', { name: 'Embeddings' })).toBeVisible()
-    await expect(page.getByText(/coming soon/i)).toBeVisible()
   })
 })
