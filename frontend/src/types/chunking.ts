@@ -8,6 +8,7 @@ export interface ChunkingResult {
   totalChunks: number
   strategy: 'fixed-size'
   chunkSize: number
+  overlap: number
 }
 
 export interface ChunkRunResponse {

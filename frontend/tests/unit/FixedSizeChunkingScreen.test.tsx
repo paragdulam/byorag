@@ -1,12 +1,21 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render as rtlRender, screen, within } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { FixedSizeChunkingScreen } from '../../src/components/chunking/FixedSizeChunkingScreen'
 import { useFixedSizeChunking } from '../../src/hooks/useFixedSizeChunking'
 import type { UseFixedSizeChunking } from '../../src/hooks/useFixedSizeChunking'
 import type { SourceDocument } from '../../src/types/sourceDocument'
+import { CorpusProvider } from '../../src/context/CorpusContext'
 
 vi.mock('../../src/hooks/useFixedSizeChunking')
+
+// Every call site below renders <FixedSizeChunkingScreen /> via this local
+// `render`, which wraps in CorpusProvider — required because AppShell ->
+// SidebarNav reads the active corpus from context (008-corpora-management).
+function render(ui: ReactElement) {
+  return rtlRender(<CorpusProvider>{ui}</CorpusProvider>)
+}
 
 const mockedUseFixedSizeChunking = vi.mocked(useFixedSizeChunking)
 
@@ -28,8 +37,11 @@ function mockState(overrides: Partial<UseFixedSizeChunking> = {}): UseFixedSizeC
     status: 'idle',
     progressPercent: 0,
     result: null,
-    hasSucceededOnce: false,
+    saveStatus: 'idle',
+    hasSavedOnce: false,
+    isSaved: false,
     run: vi.fn(),
+    save: vi.fn(),
     ...overrides,
   }
   mockedUseFixedSizeChunking.mockReturnValue(state)
@@ -90,7 +102,7 @@ describe('FixedSizeChunkingScreen — horizontal control bar (US1)', () => {
     expect(screen.queryByLabelText(/chunk size/i)).not.toBeInTheDocument()
   })
 
-  it('calls run with the selected document id and chunk size when Re-calculate Chunks is clicked', async () => {
+  it('calls run with the selected document id, chunk size, and overlap when Re-calculate Chunks is clicked', async () => {
     const state = mockState()
 
     render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
@@ -98,9 +110,10 @@ describe('FixedSizeChunkingScreen — horizontal control bar (US1)', () => {
     await userEvent.selectOptions(screen.getByLabelText(/select document/i), 'report.pdf')
     await userEvent.clear(screen.getByLabelText(/chunk size/i))
     await userEvent.type(screen.getByLabelText(/chunk size/i), '50')
+    fireEvent.change(screen.getByLabelText(/^overlap$/i), { target: { value: '10' } })
     await userEvent.click(screen.getByRole('button', { name: /re-calculate chunks/i }))
 
-    expect(state.run).toHaveBeenCalledWith('report.pdf', 50)
+    expect(state.run).toHaveBeenCalledWith('report.pdf', 50, 10)
   })
 
   it('shows a validation message and does not call run for an invalid chunk size', async () => {
@@ -116,6 +129,34 @@ describe('FixedSizeChunkingScreen — horizontal control bar (US1)', () => {
     expect(state.run).not.toHaveBeenCalled()
   })
 
+  it('shows a validation message and does not call run when overlap equals chunk size', async () => {
+    const state = mockState()
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    await userEvent.clear(screen.getByLabelText(/chunk size/i))
+    await userEvent.type(screen.getByLabelText(/chunk size/i), '50')
+    fireEvent.change(screen.getByLabelText(/^overlap$/i), { target: { value: '50' } })
+    await userEvent.click(screen.getByRole('button', { name: /re-calculate chunks/i }))
+
+    expect(screen.getByText(/overlap must be smaller than chunk size/i)).toBeInTheDocument()
+    expect(state.run).not.toHaveBeenCalled()
+  })
+
+  it('shows a validation message and does not call run when overlap exceeds chunk size', async () => {
+    const state = mockState()
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    await userEvent.clear(screen.getByLabelText(/chunk size/i))
+    await userEvent.type(screen.getByLabelText(/chunk size/i), '30')
+    fireEvent.change(screen.getByLabelText(/^overlap$/i), { target: { value: '75' } })
+    await userEvent.click(screen.getByRole('button', { name: /re-calculate chunks/i }))
+
+    expect(screen.getByText(/overlap must be smaller than chunk size/i)).toBeInTheDocument()
+    expect(state.run).not.toHaveBeenCalled()
+  })
+
   it('renders the resulting chunks with their position and content', () => {
     mockState({
       status: 'success',
@@ -127,6 +168,7 @@ describe('FixedSizeChunkingScreen — horizontal control bar (US1)', () => {
         totalChunks: 2,
         strategy: 'fixed-size',
         chunkSize: 50,
+        overlap: 0,
       },
     })
 
@@ -154,6 +196,7 @@ describe('FixedSizeChunkingScreen — horizontal control bar (US1)', () => {
         totalChunks: 812,
         strategy: 'fixed-size',
         chunkSize: 5,
+        overlap: 0,
       },
     })
 
@@ -185,7 +228,7 @@ describe('FixedSizeChunkingScreen — live progress and scroll containment (US2)
     mockState({
       status: 'success',
       progressPercent: 100,
-      result: { chunks: [], totalChunks: 0, strategy: 'fixed-size', chunkSize: 50 },
+      result: { chunks: [], totalChunks: 0, strategy: 'fixed-size', chunkSize: 50, overlap: 0 },
     })
 
     render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
@@ -201,6 +244,7 @@ describe('FixedSizeChunkingScreen — live progress and scroll containment (US2)
         totalChunks: 1,
         strategy: 'fixed-size',
         chunkSize: 50,
+        overlap: 0,
       },
     })
 
@@ -212,27 +256,113 @@ describe('FixedSizeChunkingScreen — live progress and scroll containment (US2)
   })
 })
 
+describe('FixedSizeChunkingScreen — overlap readout (007-chunking-overlap-controls US1)', () => {
+  it('shows the current overlap value as a visible number next to the slider', () => {
+    mockState()
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    const slider = screen.getByLabelText(/^overlap$/i)
+    expect(screen.getByText(slider.getAttribute('value') ?? '')).toBeInTheDocument()
+  })
+
+  it('updates the displayed overlap number immediately when the slider changes', () => {
+    mockState()
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    const slider = screen.getByLabelText(/^overlap$/i)
+    fireEvent.change(slider, { target: { value: '120' } })
+
+    expect(screen.getByText('120')).toBeInTheDocument()
+  })
+})
+
+describe('FixedSizeChunkingScreen — chunk count below overlap (007-chunking-overlap-controls US2)', () => {
+  it('shows no chunk count before any chunking run has completed', () => {
+    mockState({ status: 'idle', result: null })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.queryByTestId('overlap-chunk-count')).not.toBeInTheDocument()
+  })
+
+  it('shows the total chunk count below the Overlap slider, right-aligned, after a successful run', () => {
+    mockState({
+      status: 'success',
+      result: {
+        chunks: [{ index: 0, content: 'first chunk text' }],
+        totalChunks: 42,
+        strategy: 'fixed-size',
+        chunkSize: 50,
+        overlap: 0,
+      },
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    const count = screen.getByTestId('overlap-chunk-count')
+    expect(count).toHaveTextContent('42')
+    expect(count.className).toMatch(/text-right/)
+
+    const bar = screen.getByTestId('chunking-control-bar')
+    expect(within(bar).getByTestId('overlap-chunk-count')).toBeInTheDocument()
+  })
+
+  it('updates the displayed chunk count after a subsequent successful re-run', () => {
+    const { rerender } = render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+    mockState({
+      status: 'success',
+      result: { chunks: [], totalChunks: 10, strategy: 'fixed-size', chunkSize: 50, overlap: 0 },
+    })
+    rerender(<CorpusProvider><FixedSizeChunkingScreen onNavigate={vi.fn()} /></CorpusProvider>)
+
+    expect(screen.getByTestId('overlap-chunk-count')).toHaveTextContent('10')
+
+    mockState({
+      status: 'success',
+      result: { chunks: [], totalChunks: 25, strategy: 'fixed-size', chunkSize: 50, overlap: 0 },
+    })
+    rerender(<CorpusProvider><FixedSizeChunkingScreen onNavigate={vi.fn()} /></CorpusProvider>)
+
+    expect(screen.getByTestId('overlap-chunk-count')).toHaveTextContent('25')
+  })
+})
+
 describe('FixedSizeChunkingScreen — bottom action bar and Move to Embeddings gating (US3)', () => {
-  it('shows exactly two buttons in the bottom bar', () => {
+  it('shows exactly three buttons in the bottom bar', () => {
     mockState()
 
     render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
 
     expect(screen.getByRole('button', { name: /re-calculate chunks/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /save chunks/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /move to embeddings/i })).toBeInTheDocument()
   })
 
-  it('disables Move to Embeddings until a chunk run has succeeded once', () => {
-    mockState({ hasSucceededOnce: false })
+  it('disables Move to Embeddings until a chunk save has succeeded once', () => {
+    mockState({ hasSavedOnce: false })
 
     render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
 
     expect(screen.getByRole('button', { name: /move to embeddings/i })).toBeDisabled()
   })
 
-  it('enables Move to Embeddings once hasSucceededOnce is true and navigates to embeddings when clicked', async () => {
+  it('keeps Move to Embeddings disabled after a successful preview alone, before any save', () => {
+    mockState({
+      status: 'success',
+      result: { chunks: [], totalChunks: 0, strategy: 'fixed-size', chunkSize: 50, overlap: 0 },
+      hasSavedOnce: false,
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: /move to embeddings/i })).toBeDisabled()
+  })
+
+  it('enables Move to Embeddings once hasSavedOnce is true and navigates to embeddings when clicked', async () => {
     const onNavigate = vi.fn()
-    mockState({ hasSucceededOnce: true })
+    mockState({ hasSavedOnce: true })
 
     render(<FixedSizeChunkingScreen onNavigate={onNavigate} />)
 
@@ -242,5 +372,81 @@ describe('FixedSizeChunkingScreen — bottom action bar and Move to Embeddings g
     await userEvent.click(button)
 
     expect(onNavigate).toHaveBeenCalledWith('embeddings')
+  })
+})
+
+describe('FixedSizeChunkingScreen — Save Chunks button (012-save-chunks-button US2)', () => {
+  it('disables Save Chunks when there is no successful preview yet', () => {
+    mockState({ status: 'idle', result: null })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: /save chunks/i })).toBeDisabled()
+  })
+
+  it('enables Save Chunks after a successful preview and calls save() when clicked', async () => {
+    const state = mockState({
+      status: 'success',
+      result: { chunks: [], totalChunks: 0, strategy: 'fixed-size', chunkSize: 50, overlap: 0 },
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    const button = screen.getByRole('button', { name: /save chunks/i })
+    expect(button).toBeEnabled()
+
+    await userEvent.click(button)
+
+    expect(state.save).toHaveBeenCalled()
+  })
+
+  it('disables Save Chunks while a save is in flight', () => {
+    mockState({
+      status: 'success',
+      result: { chunks: [], totalChunks: 0, strategy: 'fixed-size', chunkSize: 50, overlap: 0 },
+      saveStatus: 'saving',
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: /save chunks/i })).toBeDisabled()
+  })
+
+  it('shows a clear error message when saving fails', () => {
+    mockState({
+      status: 'success',
+      result: { chunks: [], totalChunks: 0, strategy: 'fixed-size', chunkSize: 50, overlap: 0 },
+      saveStatus: 'error',
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/could not be saved|failed to save/i)
+  })
+})
+
+describe('FixedSizeChunkingScreen — saved/unsaved indicator (012-save-chunks-button US3)', () => {
+  it('shows an unsaved indicator when the current preview has not been saved', () => {
+    mockState({
+      status: 'success',
+      result: { chunks: [], totalChunks: 0, strategy: 'fixed-size', chunkSize: 50, overlap: 0 },
+      isSaved: false,
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByTestId('save-status-indicator')).toHaveTextContent(/not saved|unsaved/i)
+  })
+
+  it('shows a saved indicator when the current preview matches what was saved', () => {
+    mockState({
+      status: 'success',
+      result: { chunks: [], totalChunks: 0, strategy: 'fixed-size', chunkSize: 50, overlap: 0 },
+      isSaved: true,
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByTestId('save-status-indicator')).toHaveTextContent(/^saved$/i)
   })
 })

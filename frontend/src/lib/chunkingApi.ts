@@ -2,6 +2,7 @@ import type { ChunkProgressEvent, ChunkRunResponse } from '../types/chunking'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 const CHUNKING_STREAM_ENDPOINT = `${API_BASE_URL}/api/chunking/run/stream`
+const CHUNKING_SAVE_ENDPOINT = `${API_BASE_URL}/api/chunking/save`
 
 export interface ChunkingStreamHandlers {
   onProgress: (percent: number) => void
@@ -17,9 +18,10 @@ export interface ChunkingStreamHandlers {
 export function runChunkingStream(
   documentId: string,
   chunkSize: number,
+  overlap: number,
   { onProgress, onResult, onError }: ChunkingStreamHandlers,
 ): () => void {
-  const url = `${CHUNKING_STREAM_ENDPOINT}?documentId=${encodeURIComponent(documentId)}&chunkSize=${encodeURIComponent(String(chunkSize))}`
+  const url = `${CHUNKING_STREAM_ENDPOINT}?documentId=${encodeURIComponent(documentId)}&chunkSize=${encodeURIComponent(String(chunkSize))}&overlap=${encodeURIComponent(String(overlap))}`
   const source = new EventSource(url)
 
   source.addEventListener('progress', (event) => {
@@ -45,4 +47,30 @@ export function runChunkingStream(
   })
 
   return () => source.close()
+}
+
+/**
+ * Recomputes and persists a chunking result for a document (contracts/chunking-save-api.md),
+ * fully replacing any previously saved chunks for it. Strategy is not a parameter — same
+ * "fixed-size"-only scope as `runChunkingStream`.
+ */
+export async function saveChunks(
+  documentId: string,
+  chunkSize: number,
+  overlap: number,
+): Promise<ChunkRunResponse> {
+  const response = await fetch(CHUNKING_SAVE_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ documentId, chunkSize, overlap }),
+  })
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(
+      typeof body.detail === 'string' ? body.detail : 'Failed to save chunks',
+    )
+  }
+
+  return (await response.json()) as ChunkRunResponse
 }

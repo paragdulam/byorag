@@ -2,7 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import type { DeletionResult, SourceDocument, UploadRejection } from '../types/sourceDocument'
 import { validateFile } from '../lib/fileValidation'
 import { MAX_UPLOAD_SIZE_BYTES, ACCEPTED_UPLOAD_TYPES } from '../lib/uploadConstraints'
-import { deleteSources, listSources, uploadSources } from '../lib/sourcesApi'
+import {
+  attachDocumentToCorpus,
+  deleteSources,
+  listSources,
+  removeDocumentFromCorpus,
+  uploadSources,
+} from '../lib/sourcesApi'
 
 export interface UseSourceDocuments {
   documents: SourceDocument[]
@@ -13,18 +19,31 @@ export interface UseSourceDocuments {
   clearRejections: () => void
   deleteDocuments: (ids: string[]) => void
   clearDeletionErrors: () => void
+  attachToCorpus: (documentId: string, targetCorpusId: string) => Promise<void>
+  removeFromCorpus: (documentId: string) => Promise<void>
 }
 
-export function useSourceDocuments(): UseSourceDocuments {
+export function useSourceDocuments(corpusId: string | null): UseSourceDocuments {
   const [documents, setDocuments] = useState<SourceDocument[]>([])
   const [rejections, setRejections] = useState<UploadRejection[]>([])
   const [deletionErrors, setDeletionErrors] = useState<DeletionResult[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(corpusId !== null)
 
   useEffect(() => {
-    let cancelled = false
+    if (corpusId === null) {
+      setDocuments([])
+      setIsLoading(false)
+      return
+    }
 
-    listSources()
+    let cancelled = false
+    setIsLoading(true)
+    // Clear the previous corpus's documents immediately so switching the
+    // active corpus never shows a stale mix of two corpora's documents
+    // while the new corpus's list is in flight (FR-004).
+    setDocuments([])
+
+    listSources(corpusId)
       .then((docs) => {
         if (!cancelled) {
           // Merge rather than overwrite: an upload triggered before this
@@ -47,9 +66,13 @@ export function useSourceDocuments(): UseSourceDocuments {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [corpusId])
 
   const addFiles = useCallback((files: File[]) => {
+    if (corpusId === null) {
+      return
+    }
+
     const clientRejections: UploadRejection[] = []
     const candidateFiles: File[] = []
 
@@ -87,12 +110,18 @@ export function useSourceDocuments(): UseSourceDocuments {
     }))
     setDocuments((prev) => [...prev, ...placeholders])
 
-    uploadSources(candidateFiles)
+    uploadSources(candidateFiles, corpusId)
       .then(({ documents: savedDocuments, rejections: serverRejections }) => {
-        setDocuments((prev) => [
-          ...prev.filter((doc) => !placeholderIds.includes(doc.id)),
-          ...savedDocuments,
-        ])
+        setDocuments((prev) => {
+          // A dedup'd upload (content-hash match, FR-005) can return a document
+          // already present in this corpus's list -- filter it out of `prev` so
+          // it isn't duplicated, in addition to dropping its placeholder.
+          const savedIds = new Set(savedDocuments.map((doc) => doc.id))
+          const remaining = prev.filter(
+            (doc) => !placeholderIds.includes(doc.id) && !savedIds.has(doc.id),
+          )
+          return [...remaining, ...savedDocuments]
+        })
         if (serverRejections.length > 0) {
           setRejections((prev) => [...prev, ...serverRejections])
         }
@@ -107,7 +136,7 @@ export function useSourceDocuments(): UseSourceDocuments {
           })),
         ])
       })
-  }, [])
+  }, [corpusId])
 
   const clearRejections = useCallback(() => {
     setRejections([])
@@ -144,11 +173,28 @@ export function useSourceDocuments(): UseSourceDocuments {
     setDeletionErrors([])
   }, [])
 
+  const attachToCorpus = useCallback(async (documentId: string, targetCorpusId: string) => {
+    await attachDocumentToCorpus(documentId, targetCorpusId)
+  }, [])
+
+  const removeFromCorpus = useCallback(
+    async (documentId: string) => {
+      if (corpusId === null) {
+        return
+      }
+      await removeDocumentFromCorpus(documentId, corpusId)
+      setDocuments((prev) => prev.filter((doc) => doc.id !== documentId))
+    },
+    [corpusId],
+  )
+
   return {
     documents,
     rejections,
     deletionErrors,
     isLoading,
+    attachToCorpus,
+    removeFromCorpus,
     addFiles,
     clearRejections,
     deleteDocuments,

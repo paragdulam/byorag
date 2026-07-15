@@ -2,10 +2,18 @@ import { useState } from 'react'
 import type { SourceDocument } from '../../types/sourceDocument'
 import { formatFileSize } from '../../lib/formatFileSize'
 
+export interface OtherCorpus {
+  id: string
+  name: string
+}
+
 export interface DocumentListProps {
   documents: SourceDocument[]
   onExportCsv: () => void
   onDeleteDocuments: (ids: string[]) => void
+  otherCorpora?: OtherCorpus[]
+  onAttachToCorpus?: (documentId: string, targetCorpusId: string) => void
+  onRemoveFromCorpus?: (documentId: string) => void
 }
 
 function formatUploadedAt(date: Date): string {
@@ -41,7 +49,14 @@ function handleDeleteRow(doc: SourceDocument, onDeleteDocuments: (ids: string[])
   }
 }
 
-export function DocumentList({ documents, onExportCsv, onDeleteDocuments }: DocumentListProps) {
+export function DocumentList({
+  documents,
+  onExportCsv,
+  onDeleteDocuments,
+  otherCorpora = [],
+  onAttachToCorpus,
+  onRemoveFromCorpus,
+}: DocumentListProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const toggleSelected = (id: string) => {
@@ -132,14 +147,49 @@ export function DocumentList({ documents, onExportCsv, onDeleteDocuments }: Docu
               </td>
               <td className="px-6 py-4 text-right">
                 {doc.status === 'processed' && (
-                  <button
-                    type="button"
-                    aria-label={`Delete ${doc.name}`}
-                    onClick={() => handleDeleteRow(doc, onDeleteDocuments)}
-                    className="rounded border border-outline-variant px-3 py-1 text-sm text-on-surface hover:bg-surface-container-high"
-                  >
-                    Delete
-                  </button>
+                  <div className="flex items-center justify-end gap-2">
+                    {onAttachToCorpus && otherCorpora.length > 0 && (
+                      <select
+                        aria-label={`Add ${doc.name} to another corpus`}
+                        defaultValue=""
+                        onChange={(event) => {
+                          const targetCorpusId = event.target.value
+                          if (targetCorpusId) {
+                            onAttachToCorpus(doc.id, targetCorpusId)
+                            event.target.value = ''
+                          }
+                        }}
+                        className="rounded border border-outline-variant bg-surface px-2 py-1 text-xs text-on-surface"
+                      >
+                        <option value="" disabled>
+                          Add to corpus…
+                        </option>
+                        {otherCorpora.map((corpus) => (
+                          <option key={corpus.id} value={corpus.id}>
+                            {corpus.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {onRemoveFromCorpus && (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${doc.name} from this corpus`}
+                        onClick={() => onRemoveFromCorpus(doc.id)}
+                        className="rounded border border-outline-variant px-3 py-1 text-sm text-on-surface hover:bg-surface-container-high"
+                      >
+                        Remove from Corpus
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      aria-label={`Delete ${doc.name}`}
+                      onClick={() => handleDeleteRow(doc, onDeleteDocuments)}
+                      className="rounded border border-outline-variant px-3 py-1 text-sm text-on-surface hover:bg-surface-container-high"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 )}
               </td>
             </tr>

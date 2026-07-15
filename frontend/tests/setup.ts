@@ -2,15 +2,30 @@ import '@testing-library/jest-dom/vitest'
 import { afterEach, beforeEach, vi } from 'vitest'
 
 // Default fetch mock: routes by URL so every hook that fetches on mount
-// (useSourceDocuments, useSystemCapacity) gets a sane empty/ready response
-// without a real network call, unless a test overrides global.fetch itself.
-// See specs/002-persist-pdf-sources/quickstart.md and
-// specs/003-system-capacity-widget/quickstart.md.
+// (useSourceDocuments, useSystemCapacity, CorpusContext) gets a sane
+// empty/ready response without a real network call, unless a test overrides
+// global.fetch itself. A single default corpus is returned so components
+// nested under SidebarNav (which requires a CorpusProvider ancestor) render
+// with a non-null active corpus by default. See
+// specs/002-persist-pdf-sources/quickstart.md,
+// specs/003-system-capacity-widget/quickstart.md, and
+// specs/008-corpora-management/quickstart.md.
 beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString()
+
+      if (url.includes('/api/corpora')) {
+        return new Response(
+          JSON.stringify({
+            corpora: [
+              { id: 'default-corpus', name: 'Uncategorized', createdAt: '2026-07-14T00:00:00Z' },
+            ],
+          }),
+          { status: 200 },
+        )
+      }
 
       if (url.includes('/api/system/capacity')) {
         return new Response(

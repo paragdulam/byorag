@@ -1,4 +1,15 @@
 services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: byorag
+      POSTGRES_PASSWORD: byorag
+      POSTGRES_DB: byorag
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
   backend:
     build:
       context: ./backend
@@ -6,8 +17,11 @@ services:
       - "8000:8000"
     environment:
       PDFS_DIR: /data/pdfs
+      DATABASE_URL: postgresql+psycopg://byorag:byorag@postgres:5432/byorag
     volumes:
       - pdfs_data:/data/pdfs
+    depends_on:
+      - postgres
 
   frontend:
     build:
@@ -21,3 +35,4 @@ services:
 
 volumes:
   pdfs_data:
+  pgdata:

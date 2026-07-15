@@ -1,17 +1,23 @@
 import { render, screen } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { EmbeddingsScreen } from '../../src/components/chunking/EmbeddingsScreen'
+import { CorpusProvider } from '../../src/context/CorpusContext'
+
+function renderWithProvider(ui: ReactElement) {
+  return render(<CorpusProvider>{ui}</CorpusProvider>)
+}
 
 describe('EmbeddingsScreen', () => {
   it('renders within the standard navigation shell', () => {
-    render(<EmbeddingsScreen onNavigate={vi.fn()} />)
+    renderWithProvider(<EmbeddingsScreen onNavigate={vi.fn()} />)
 
     expect(screen.getByText('CHUNKING')).toBeInTheDocument()
     expect(screen.getByText('SOURCES')).toBeInTheDocument()
   })
 
   it('shows a short "coming soon" style message and no functional controls in the main content area', () => {
-    render(<EmbeddingsScreen onNavigate={vi.fn()} />)
+    renderWithProvider(<EmbeddingsScreen onNavigate={vi.fn()} />)
 
     const message = screen.getByText(/coming soon/i)
     expect(message).toBeInTheDocument()

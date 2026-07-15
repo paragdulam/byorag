@@ -1,10 +1,15 @@
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import UploadFile
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.config import ensure_pdfs_dir, settings
+from app.db.hashing import compute_content_hash
+from app.db.lookups import get_corpus_or_none, get_document_or_none
+from app.db.models import Document, DocumentCorpus
 from app.sources.schemas import (
+    AllSourceDocument,
     DeletionResult,
     SourceDocument,
     UploadRejection,
@@ -16,26 +21,74 @@ ACCEPTED_EXTENSION = ".pdf"
 ACCEPTED_CONTENT_TYPE = "application/pdf"
 
 
-def _stat_to_document(path: Path) -> SourceDocument:
-    stat = path.stat()
+class DocumentNotFoundError(Exception):
+    def __init__(self, document_id: str) -> None:
+        self.document_id = document_id
+        super().__init__(f"No document found with id '{document_id}'")
+
+
+class CorpusNotFoundError(Exception):
+    def __init__(self, corpus_id: str) -> None:
+        self.corpus_id = corpus_id
+        super().__init__(f"No corpus found with id '{corpus_id}'")
+
+
+class DocumentNotInCorpusError(Exception):
+    def __init__(self, document_id: str, corpus_id: str) -> None:
+        self.document_id = document_id
+        self.corpus_id = corpus_id
+        super().__init__(f"Document '{document_id}' is not associated with corpus '{corpus_id}'")
+
+
+def _document_to_source_document(document: Document) -> SourceDocument:
     return SourceDocument(
-        id=path.name,
-        name=path.name,
-        sizeBytes=stat.st_size,
-        uploadedAt=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
-        status="processed",
+        id=document.id,
+        name=document.name,
+        sizeBytes=document.size_bytes,
+        uploadedAt=document.uploaded_at,
+        status=document.status,
     )
 
 
-def list_documents(pdfs_dir: Path | None = None) -> list[SourceDocument]:
-    directory = pdfs_dir if pdfs_dir is not None else settings.pdfs_dir
-    ensure_pdfs_dir(directory)
+def list_all_documents(db: Session) -> list[AllSourceDocument]:
+    """Every document in the system, regardless of corpus, each annotated with
+    every corpus it's currently associated with (009-corpora-screen,
+    contracts/list-all-documents-api.md). Unpaginated, consistent with this
+    project's established small/personal scale assumption."""
+    documents = (
+        db.execute(select(Document).order_by(Document.uploaded_at.asc())).scalars().all()
+    )
+    links = db.execute(select(DocumentCorpus)).scalars().all()
 
-    documents = [
-        _stat_to_document(path) for path in directory.iterdir() if path.is_file()
+    corpus_ids_by_document: dict[str, list[str]] = {}
+    for link in links:
+        corpus_ids_by_document.setdefault(link.document_id, []).append(link.corpus_id)
+
+    return [
+        AllSourceDocument(
+            id=document.id,
+            name=document.name,
+            sizeBytes=document.size_bytes,
+            uploadedAt=document.uploaded_at,
+            status=document.status,
+            corpusIds=corpus_ids_by_document.get(document.id, []),
+        )
+        for document in documents
     ]
-    documents.sort(key=lambda doc: doc.uploadedAt)
-    return documents
+
+
+def list_documents(db: Session, corpus_id: str) -> list[SourceDocument]:
+    documents = (
+        db.execute(
+            select(Document)
+            .join(DocumentCorpus, DocumentCorpus.document_id == Document.id)
+            .where(DocumentCorpus.corpus_id == corpus_id)
+            .order_by(Document.uploaded_at.asc())
+        )
+        .scalars()
+        .all()
+    )
+    return [_document_to_source_document(document) for document in documents]
 
 
 def validate_file(
@@ -66,16 +119,36 @@ def resolve_collision_name(name: str, existing_names: set[str]) -> str:
         counter += 1
 
 
-def save_file(upload: UploadFile, pdfs_dir: Path | None = None) -> SourceDocument | UploadRejection:
-    directory = pdfs_dir if pdfs_dir is not None else settings.pdfs_dir
-    ensure_pdfs_dir(directory)
+def _link_document_to_corpus(db: Session, document_id: str, corpus_id: str) -> None:
+    """Idempotent: a document already linked to this corpus is a no-op (FR-006)."""
+    existing_link = db.get(DocumentCorpus, {"document_id": document_id, "corpus_id": corpus_id})
+    if existing_link is None:
+        db.add(DocumentCorpus(document_id=document_id, corpus_id=corpus_id))
+    db.commit()
 
+
+def save_file(
+    upload: UploadFile, db: Session, corpus_id: str
+) -> SourceDocument | UploadRejection:
     contents = upload.file.read()
 
     rejection_reason = validate_file(upload.filename or "", len(contents), upload.content_type)
     if rejection_reason is not None:
         return UploadRejection(fileName=upload.filename or "", reason=rejection_reason)
 
+    content_hash = compute_content_hash(contents)
+    existing = db.execute(
+        select(Document).where(Document.content_hash == content_hash)
+    ).scalar_one_or_none()
+    if existing is not None:
+        # Auto-dedupe by content (FR-005, research.md §3): reuse the existing
+        # document and its chunks instead of writing a duplicate file or
+        # re-running chunking.
+        _link_document_to_corpus(db, existing.id, corpus_id)
+        return _document_to_source_document(existing)
+
+    directory = settings.pdfs_dir
+    ensure_pdfs_dir(directory)
     existing_names = {p.name for p in directory.iterdir() if p.is_file()}
     target_name = resolve_collision_name(upload.filename or "", existing_names)
     target_path = directory / target_name
@@ -87,38 +160,80 @@ def save_file(upload: UploadFile, pdfs_dir: Path | None = None) -> SourceDocumen
             target_path.unlink(missing_ok=True)
         return UploadRejection(fileName=upload.filename or "", reason="save-failed")
 
-    return _stat_to_document(target_path)
+    document = Document(
+        name=target_name,
+        content_hash=content_hash,
+        storage_path=str(target_path),
+        size_bytes=len(contents),
+        status="processed",
+    )
+    db.add(document)
+    db.flush()
+    db.add(DocumentCorpus(document_id=document.id, corpus_id=corpus_id))
+    db.commit()
+    db.refresh(document)
+    return _document_to_source_document(document)
 
 
-def _is_safe_id(document_id: str, directory: Path) -> bool:
-    if not document_id or "/" in document_id or "\\" in document_id:
-        return False
+def attach_document_to_corpus(db: Session, document_id: str, corpus_id: str) -> None:
+    if get_document_or_none(db, document_id) is None:
+        raise DocumentNotFoundError(document_id)
+    if get_corpus_or_none(db, corpus_id) is None:
+        raise CorpusNotFoundError(corpus_id)
 
-    candidate = (directory / document_id).resolve()
-    try:
-        candidate.relative_to(directory.resolve())
-    except ValueError:
-        return False
-    return True
+    _link_document_to_corpus(db, document_id, corpus_id)
 
 
-def delete_documents(ids: list[str], pdfs_dir: Path | None = None) -> list[DeletionResult]:
-    directory = pdfs_dir if pdfs_dir is not None else settings.pdfs_dir
-    ensure_pdfs_dir(directory)
+def unlink_document_from_corpus(db: Session, document_id: str, corpus_id: str) -> None:
+    """Unlink a document from one corpus (FR-007). If this was the document's
+    last remaining corpus, delete the document, its chunks (DB cascade), and
+    its file (FR-008, research.md §6)."""
+    document = get_document_or_none(db, document_id)
+    if document is None:
+        raise DocumentNotFoundError(document_id)
+    if get_corpus_or_none(db, corpus_id) is None:
+        raise CorpusNotFoundError(corpus_id)
 
+    link = db.get(DocumentCorpus, {"document_id": document_id, "corpus_id": corpus_id})
+    if link is None:
+        raise DocumentNotInCorpusError(document_id, corpus_id)
+
+    db.delete(link)
+    db.flush()
+
+    remaining = db.execute(
+        select(DocumentCorpus).where(DocumentCorpus.document_id == document_id)
+    ).scalars().all()
+
+    if remaining:
+        db.commit()
+        return
+
+    storage_path = Path(document.storage_path)
+    db.delete(document)
+    db.commit()
+    storage_path.unlink(missing_ok=True)
+
+
+def delete_documents(db: Session, ids: list[str]) -> list[DeletionResult]:
     results: list[DeletionResult] = []
     for document_id in ids:
-        if not _is_safe_id(document_id, directory):
-            results.append(DeletionResult(id=document_id, status="failed", reason="invalid id"))
+        document = get_document_or_none(db, document_id)
+        if document is None:
+            # Idempotent: the desired end state (no such document) already
+            # holds, matching 004-delete-source-documents' original semantics.
+            results.append(DeletionResult(id=document_id, status="deleted"))
             continue
 
+        storage_path = Path(document.storage_path)
         try:
-            (directory / document_id).unlink()
-        except FileNotFoundError:
-            results.append(DeletionResult(id=document_id, status="deleted"))
+            storage_path.unlink(missing_ok=True)
         except OSError as exc:
             results.append(DeletionResult(id=document_id, status="failed", reason=str(exc)))
-        else:
-            results.append(DeletionResult(id=document_id, status="deleted"))
+            continue
+
+        db.delete(document)
+        db.commit()
+        results.append(DeletionResult(id=document_id, status="deleted"))
 
     return results

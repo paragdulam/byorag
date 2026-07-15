@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChunkingResult } from '../types/chunking'
 import type { SourceDocument } from '../types/sourceDocument'
-import { runChunkingStream } from '../lib/chunkingApi'
+import { runChunkingStream, saveChunks } from '../lib/chunkingApi'
 import { listSources } from '../lib/sourcesApi'
 
 export type ChunkingRunStatus = 'idle' | 'running' | 'success' | 'extraction-failed' | 'error'
+export type ChunkingSaveStatus = 'idle' | 'saving' | 'success' | 'error'
+
+interface RunParams {
+  documentId: string
+  chunkSize: number
+  overlap: number
+}
 
 export interface UseFixedSizeChunking {
   documents: SourceDocument[]
@@ -12,23 +19,42 @@ export interface UseFixedSizeChunking {
   status: ChunkingRunStatus
   progressPercent: number
   result: ChunkingResult | null
-  hasSucceededOnce: boolean
-  run: (documentId: string, chunkSize: number) => void
+  saveStatus: ChunkingSaveStatus
+  hasSavedOnce: boolean
+  isSaved: boolean
+  run: (documentId: string, chunkSize: number, overlap?: number) => void
+  save: () => Promise<void>
 }
 
-export function useFixedSizeChunking(): UseFixedSizeChunking {
+export function useFixedSizeChunking(corpusId: string | null): UseFixedSizeChunking {
   const [documents, setDocuments] = useState<SourceDocument[]>([])
-  const [isLoadingDocuments, setIsLoadingDocuments] = useState(true)
+  const [isLoadingDocuments, setIsLoadingDocuments] = useState(corpusId !== null)
   const [status, setStatus] = useState<ChunkingRunStatus>('idle')
   const [progressPercent, setProgressPercent] = useState(0)
   const [result, setResult] = useState<ChunkingResult | null>(null)
-  const [hasSucceededOnce, setHasSucceededOnce] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<ChunkingSaveStatus>('idle')
+  const [hasSavedOnce, setHasSavedOnce] = useState(false)
+  const [currentRunParams, setCurrentRunParams] = useState<RunParams | null>(null)
+  // Each run() call gets its own identity (a monotonically increasing counter), not just
+  // its parameters — the spec requires that re-running with identical settings shows
+  // "unsaved" again, even though a save of that new run would persist byte-identical
+  // chunks (spec User Story 3, Acceptance Scenario 2). `savedRunId` tracks *which run*
+  // was actually saved, not merely which params were saved.
+  const [currentRunId, setCurrentRunId] = useState(0)
+  const [savedRunId, setSavedRunId] = useState<number | null>(null)
   const closeStreamRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
-    let cancelled = false
+    if (corpusId === null) {
+      setDocuments([])
+      setIsLoadingDocuments(false)
+      return
+    }
 
-    listSources()
+    let cancelled = false
+    setIsLoadingDocuments(true)
+
+    listSources(corpusId)
       .then((docs) => {
         if (!cancelled) {
           setDocuments(docs)
@@ -44,17 +70,18 @@ export function useFixedSizeChunking(): UseFixedSizeChunking {
       cancelled = true
       closeStreamRef.current?.()
     }
-  }, [])
+  }, [corpusId])
 
-  const run = useCallback((documentId: string, chunkSize: number) => {
+  const run = useCallback((documentId: string, chunkSize: number, overlap = 0) => {
     closeStreamRef.current?.()
     setStatus('running')
     setProgressPercent(0)
     setResult(null)
+    setSaveStatus('idle')
+    setCurrentRunParams({ documentId, chunkSize, overlap })
+    setCurrentRunId((id) => id + 1)
 
-    // hasSucceededOnce is a one-way latch (research.md §7): it is only ever set to true here
-    // and is never reset, even if a later run fails.
-    closeStreamRef.current = runChunkingStream(documentId, chunkSize, {
+    closeStreamRef.current = runChunkingStream(documentId, chunkSize, overlap, {
       onProgress: (percent) => setProgressPercent(percent),
       onResult: (response) => {
         if (response.extractionFailed) {
@@ -63,7 +90,6 @@ export function useFixedSizeChunking(): UseFixedSizeChunking {
         } else {
           setStatus('success')
           setResult(response.result)
-          setHasSucceededOnce(true)
         }
       },
       onError: () => {
@@ -73,13 +99,41 @@ export function useFixedSizeChunking(): UseFixedSizeChunking {
     })
   }, [])
 
+  // save() persists the chunks currently on screen — the parameters from the run that
+  // produced them (research.md §1: chunking is deterministic, so re-running the same
+  // params server-side reproduces exactly what's displayed). It is a no-op guard against
+  // calling before any successful preview exists (FR-004).
+  const save = useCallback(async () => {
+    if (currentRunParams === null) {
+      return
+    }
+
+    setSaveStatus('saving')
+    try {
+      await saveChunks(currentRunParams.documentId, currentRunParams.chunkSize, currentRunParams.overlap)
+      setSaveStatus('success')
+      setSavedRunId(currentRunId)
+      // hasSavedOnce is a one-way latch (research.md §6): it is only ever set to true
+      // here, on a successful save, and is never reset — even if a later save or
+      // preview fails.
+      setHasSavedOnce(true)
+    } catch {
+      setSaveStatus('error')
+    }
+  }, [currentRunParams, currentRunId])
+
+  const isSaved = status === 'success' && savedRunId === currentRunId
+
   return {
     documents,
     isLoadingDocuments,
     status,
     progressPercent,
     result,
-    hasSucceededOnce,
+    saveStatus,
+    hasSavedOnce,
+    isSaved,
     run,
+    save,
   }
 }

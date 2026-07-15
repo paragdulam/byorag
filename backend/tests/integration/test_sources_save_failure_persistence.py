@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 
 def test_disk_write_failure_is_reported_without_partial_file_or_list_entry(
-    client: TestClient, pdfs_dir: Path
+    client: TestClient, pdfs_dir: Path, corpus_id: str
 ) -> None:
     pdfs_dir.mkdir(parents=True, exist_ok=True)
     original_mode = pdfs_dir.stat().st_mode
@@ -16,6 +16,7 @@ def test_disk_write_failure_is_reported_without_partial_file_or_list_entry(
     try:
         response = client.post(
             "/api/sources",
+            data={"corpusId": corpus_id},
             files={"files": ("report.pdf", b"%PDF-1.4 abc", "application/pdf")},
         )
     finally:
@@ -27,5 +28,5 @@ def test_disk_write_failure_is_reported_without_partial_file_or_list_entry(
     assert body["rejections"] == [{"fileName": "report.pdf", "reason": "save-failed"}]
     assert not (pdfs_dir / "report.pdf").exists()
 
-    list_body = client.get("/api/sources").json()
+    list_body = client.get("/api/sources", params={"corpusId": corpus_id}).json()
     assert list_body["documents"] == []

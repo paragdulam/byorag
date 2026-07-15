@@ -3,40 +3,51 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 
-def test_delete_sources_removes_existing_file(client: TestClient, pdfs_dir: Path) -> None:
-    pdfs_dir.mkdir(parents=True, exist_ok=True)
-    (pdfs_dir / "report.pdf").write_bytes(b"%PDF-1.4 fake pdf contents")
+def upload_pdf(client: TestClient, corpus_id: str, name: str, content: bytes) -> str:
+    response = client.post(
+        "/api/sources",
+        data={"corpusId": corpus_id},
+        files={"files": (name, content, "application/pdf")},
+    )
+    return response.json()["documents"][0]["id"]
 
-    response = client.post("/api/sources/delete", json={"ids": ["report.pdf"]})
+
+def test_delete_sources_removes_existing_file(
+    client: TestClient, pdfs_dir: Path, corpus_id: str
+) -> None:
+    document_id = upload_pdf(client, corpus_id, "report.pdf", b"%PDF-1.4 fake pdf contents")
+
+    response = client.post("/api/sources/delete", json={"ids": [document_id]})
 
     assert response.status_code == 200
     body = response.json()
-    assert body["results"] == [{"id": "report.pdf", "status": "deleted", "reason": None}]
-    assert not (pdfs_dir / "report.pdf").exists()
+    assert body["results"] == [{"id": document_id, "status": "deleted", "reason": None}]
+    assert client.get("/api/sources", params={"corpusId": corpus_id}).json()["documents"] == []
 
 
-def test_delete_sources_already_absent_is_reported_as_deleted(client: TestClient) -> None:
-    response = client.post("/api/sources/delete", json={"ids": ["does-not-exist.pdf"]})
+def test_delete_sources_unknown_id_is_reported_as_deleted(client: TestClient) -> None:
+    response = client.post(
+        "/api/sources/delete", json={"ids": ["00000000-0000-0000-0000-000000000000"]}
+    )
 
     assert response.status_code == 200
     body = response.json()
     assert body["results"] == [
-        {"id": "does-not-exist.pdf", "status": "deleted", "reason": None}
+        {"id": "00000000-0000-0000-0000-000000000000", "status": "deleted", "reason": None}
     ]
 
 
 def test_delete_sources_returns_one_result_per_id_in_order(
-    client: TestClient, pdfs_dir: Path
+    client: TestClient, corpus_id: str
 ) -> None:
-    pdfs_dir.mkdir(parents=True, exist_ok=True)
-    (pdfs_dir / "a.pdf").write_bytes(b"a")
-    (pdfs_dir / "b.pdf").write_bytes(b"b")
+    id_a = upload_pdf(client, corpus_id, "a.pdf", b"aaaaaaaaaaaaaaaaaaaa")
+    id_b = upload_pdf(client, corpus_id, "b.pdf", b"bbbbbbbbbbbbbbbbbbbb")
 
-    response = client.post("/api/sources/delete", json={"ids": ["b.pdf", "a.pdf"]})
+    response = client.post("/api/sources/delete", json={"ids": [id_b, id_a]})
 
     assert response.status_code == 200
     body = response.json()
-    assert [r["id"] for r in body["results"]] == ["b.pdf", "a.pdf"]
+    assert [r["id"] for r in body["results"]] == [id_b, id_a]
     assert all(r["status"] == "deleted" for r in body["results"])
 
 

@@ -4,7 +4,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.chunking.router import router as chunking_router
-from app.config import ensure_pdfs_dir
+from app.config import ensure_pdfs_dir, settings
+from app.corpora.router import router as corpora_router
+from app.db.base import Base, SessionLocal, check_database_connection, engine
+from app.db.legacy_migration import migrate_legacy_pdfs
 from app.sources.router import router as sources_router
 from app.system.router import router as system_router
 
@@ -12,6 +15,13 @@ from app.system.router import router as system_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ensure_pdfs_dir()
+
+    check_database_connection(engine)
+    Base.metadata.create_all(engine)
+
+    with SessionLocal() as db:
+        migrate_legacy_pdfs(db, settings.pdfs_dir)
+
     yield
 
 
@@ -24,6 +34,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(corpora_router)
 app.include_router(sources_router)
 app.include_router(system_router)
 app.include_router(chunking_router)

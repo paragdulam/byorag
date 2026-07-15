@@ -1,27 +1,22 @@
-from pathlib import Path
-
 from fastapi.testclient import TestClient
 
 
-def test_list_sources_empty(client: TestClient) -> None:
+def test_list_sources_requires_corpus_id(client: TestClient) -> None:
     response = client.get("/api/sources")
+
+    assert response.status_code == 400
+
+
+def test_list_sources_unknown_corpus_id_returns_404(client: TestClient) -> None:
+    response = client.get("/api/sources", params={"corpusId": "00000000-0000-0000-0000-000000000000"})
+
+    assert response.status_code == 404
+
+
+def test_list_sources_empty_for_new_corpus(client: TestClient) -> None:
+    corpus = client.post("/api/corpora", json={"name": "Empty Corpus"}).json()
+
+    response = client.get("/api/sources", params={"corpusId": corpus["id"]})
 
     assert response.status_code == 200
     assert response.json() == {"documents": []}
-
-
-def test_list_sources_returns_saved_file(client: TestClient, pdfs_dir: Path) -> None:
-    pdfs_dir.mkdir(parents=True, exist_ok=True)
-    (pdfs_dir / "report.pdf").write_bytes(b"%PDF-1.4 fake pdf contents")
-
-    response = client.get("/api/sources")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert len(body["documents"]) == 1
-    doc = body["documents"][0]
-    assert doc["name"] == "report.pdf"
-    assert doc["id"] == "report.pdf"
-    assert doc["sizeBytes"] == len(b"%PDF-1.4 fake pdf contents")
-    assert doc["status"] == "processed"
-    assert "uploadedAt" in doc

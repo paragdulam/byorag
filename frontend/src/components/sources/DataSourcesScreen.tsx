@@ -6,6 +6,7 @@ import { DocumentList } from './DocumentList'
 import { useSourceDocuments } from '../../hooks/useSourceDocuments'
 import { MAX_UPLOAD_SIZE_BYTES, ACCEPTED_UPLOAD_TYPES } from '../../lib/uploadConstraints'
 import { exportCsv } from '../../lib/exportCsv'
+import { useCorpus } from '../../context/CorpusContext'
 
 function formatDeletionErrorMessage(result: { id: string; reason: string | null }): string {
   return `${result.id}: ${result.reason ?? 'Could not be deleted'}`
@@ -16,8 +17,18 @@ export interface DataSourcesScreenProps {
 }
 
 export function DataSourcesScreen({ onNavigate }: DataSourcesScreenProps) {
-  const { documents, rejections, deletionErrors, isLoading, addFiles, deleteDocuments } =
-    useSourceDocuments()
+  const { activeCorpusId, corpora, isLoading: isCorporaLoading } = useCorpus()
+  const {
+    documents,
+    rejections,
+    deletionErrors,
+    isLoading,
+    addFiles,
+    deleteDocuments,
+    attachToCorpus,
+    removeFromCorpus,
+  } = useSourceDocuments(activeCorpusId)
+  const otherCorpora = corpora.filter((corpus) => corpus.id !== activeCorpusId)
 
   return (
     <AppShell activeScreen="sources" onNavigate={onNavigate}>
@@ -29,12 +40,22 @@ export function DataSourcesScreen({ onNavigate }: DataSourcesScreenProps) {
         <SystemCapacityWidget />
       </div>
 
-      <UploadDropzone
-        onFilesSelected={addFiles}
-        maxSizeBytes={MAX_UPLOAD_SIZE_BYTES}
-        acceptedTypes={ACCEPTED_UPLOAD_TYPES}
-        rejections={rejections}
-      />
+      {isCorporaLoading ? (
+        <p className="mt-8 text-on-surface-variant" role="status">
+          Loading corpora…
+        </p>
+      ) : activeCorpusId === null ? (
+        <p className="mt-8 text-on-surface-variant" role="status">
+          Create a corpus (see the Corpora section in the left nav) before uploading documents.
+        </p>
+      ) : (
+        <UploadDropzone
+          onFilesSelected={addFiles}
+          maxSizeBytes={MAX_UPLOAD_SIZE_BYTES}
+          acceptedTypes={ACCEPTED_UPLOAD_TYPES}
+          rejections={rejections}
+        />
+      )}
 
       {isLoading ? (
         <p className="mt-8 text-on-surface-variant" role="status">
@@ -45,6 +66,9 @@ export function DataSourcesScreen({ onNavigate }: DataSourcesScreenProps) {
           documents={documents}
           onExportCsv={() => exportCsv(documents)}
           onDeleteDocuments={deleteDocuments}
+          otherCorpora={otherCorpora}
+          onAttachToCorpus={attachToCorpus}
+          onRemoveFromCorpus={removeFromCorpus}
         />
       )}
 

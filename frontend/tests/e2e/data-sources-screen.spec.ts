@@ -9,6 +9,23 @@ test.describe('Data Sources Screen', () => {
   test('full upload -> list -> export flow', async ({ page }) => {
     await page.goto('/')
 
+    // 008-corpora-management: create and use a dedicated corpus so this test
+    // never races with other specs over a shared default corpus under
+    // parallel execution.
+    // 010-corpora-dropdown-nav: corpus creation now lives only on the
+    // dedicated Corpora screen, not the sidebar.
+    const corpusName = `Upload Flow Test ${Date.now()}`
+    const main = page.locator('main')
+    await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
+    await main.getByRole('button', { name: /new corpus/i }).click()
+    await main.getByLabel(/new corpus name/i).fill(corpusName)
+    await main.getByRole('button', { name: /^create$/i }).click()
+    await expect(main.getByTestId(/corpus-row-/).filter({ hasText: corpusName })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
+
     // 003-system-capacity-widget SC-001: the retired Vector Storage widget
     // never appears anywhere on the screen.
     await expect(page.getByText('VECTOR STORAGE')).toHaveCount(0)

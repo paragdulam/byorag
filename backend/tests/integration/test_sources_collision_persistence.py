@@ -4,14 +4,16 @@ from fastapi.testclient import TestClient
 
 
 def test_two_sequential_uploads_with_identical_filenames_leave_two_distinct_files(
-    client: TestClient, pdfs_dir: Path
+    client: TestClient, pdfs_dir: Path, corpus_id: str
 ) -> None:
     client.post(
         "/api/sources",
+        data={"corpusId": corpus_id},
         files={"files": ("report.pdf", b"%PDF-1.4 original", "application/pdf")},
     )
     client.post(
         "/api/sources",
+        data={"corpusId": corpus_id},
         files={"files": ("report.pdf", b"%PDF-1.4 replacement", "application/pdf")},
     )
 

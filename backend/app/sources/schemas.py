@@ -8,6 +8,10 @@ UploadRejectionReason = Literal["invalid-type", "too-large", "save-failed"]
 
 
 class SourceDocument(BaseModel):
+    """`id` is the server-generated Document UUID (008-corpora-management) —
+    no longer the on-disk filename, since dedup'd re-uploads mean a filename
+    is not guaranteed unique."""
+
     id: str
     name: str
     sizeBytes: int
@@ -44,3 +48,20 @@ class DeleteSourcesRequest(BaseModel):
 
 class DeleteSourcesResponse(BaseModel):
     results: list[DeletionResult]
+
+
+class AttachDocumentRequest(BaseModel):
+    corpusId: str
+
+
+class AllSourceDocument(SourceDocument):
+    """A document annotated with every corpus it's currently associated with
+    (009-corpora-screen) — used by the Corpora screen's "add existing
+    document" picker to exclude documents already in the corpus being
+    managed."""
+
+    corpusIds: list[str]
+
+
+class ListAllSourcesResponse(BaseModel):
+    documents: list[AllSourceDocument]

@@ -15,8 +15,15 @@ class ChunkingResult(BaseModel):
     totalChunks: int
     strategy: ChunkingStrategyName
     chunkSize: int
+    overlap: int
 
 
 class ChunkRunResponse(BaseModel):
     extractionFailed: bool
     result: ChunkingResult | None = None
+
+
+class ChunkSaveRequest(BaseModel):
+    documentId: str
+    chunkSize: int
+    overlap: int = 0

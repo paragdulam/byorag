@@ -29,7 +29,7 @@ describe('useSourceDocuments (US1: API-backed persistence)', () => {
       ),
     )
 
-    const { result } = renderHook(() => useSourceDocuments())
+    const { result } = renderHook(() => useSourceDocuments('corpus-1'))
 
     await waitFor(() => {
       expect(result.current.documents).toHaveLength(1)
@@ -62,7 +62,7 @@ describe('useSourceDocuments (US1: API-backed persistence)', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const { result } = renderHook(() => useSourceDocuments())
+    const { result } = renderHook(() => useSourceDocuments('corpus-1'))
 
     await waitFor(() => expect(result.current.documents).toHaveLength(0))
 
@@ -99,7 +99,7 @@ describe('useSourceDocuments (US1: API-backed persistence)', () => {
       }),
     )
 
-    const { result } = renderHook(() => useSourceDocuments())
+    const { result } = renderHook(() => useSourceDocuments('corpus-1'))
     await waitFor(() => expect(result.current.documents).toHaveLength(0))
 
     await act(async () => {
@@ -145,7 +145,7 @@ describe('useSourceDocuments (004: deleteDocuments)', () => {
   it('removes the document from state when the server reports it deleted', async () => {
     stubFetchForDelete([{ id: 'existing.pdf', status: 'deleted', reason: null }])
 
-    const { result } = renderHook(() => useSourceDocuments())
+    const { result } = renderHook(() => useSourceDocuments('corpus-1'))
     await waitFor(() => expect(result.current.documents).toHaveLength(1))
 
     await act(async () => {
@@ -162,7 +162,7 @@ describe('useSourceDocuments (004: deleteDocuments)', () => {
       { id: 'existing.pdf', status: 'failed', reason: 'Permission denied' },
     ])
 
-    const { result } = renderHook(() => useSourceDocuments())
+    const { result } = renderHook(() => useSourceDocuments('corpus-1'))
     await waitFor(() => expect(result.current.documents).toHaveLength(1))
 
     await act(async () => {

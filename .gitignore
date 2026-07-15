@@ -8,6 +8,7 @@ venv/
 # Backend-persisted source PDFs (local default storage dir) + backend build artifacts
 pdfs/
 backend/pdfs/
+backend/pdfs-e2e/
 backend/.venv/
 backend/.pytest_cache/
 

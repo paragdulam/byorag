@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { AppShell } from '../layout/AppShell'
 import type { ScreenId } from '../layout/SidebarNav'
 import { useFixedSizeChunking } from '../../hooks/useFixedSizeChunking'
+import { useCorpus } from '../../context/CorpusContext'
 
 export interface FixedSizeChunkingScreenProps {
   onNavigate: (screen: ScreenId) => void
@@ -10,14 +11,14 @@ export interface FixedSizeChunkingScreenProps {
 const SEPARATOR_OPTIONS = ['"\\n\\n"', '"\\n"', '" "', '""']
 
 export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenProps) {
-  const { documents, status, progressPercent, result, hasSucceededOnce, run } =
-    useFixedSizeChunking()
+  const { activeCorpusId } = useCorpus()
+  const { documents, status, progressPercent, result, saveStatus, hasSavedOnce, isSaved, run, save } =
+    useFixedSizeChunking(activeCorpusId)
 
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>('')
   const [chunkSizeInput, setChunkSizeInput] = useState('512')
   const [validationError, setValidationError] = useState<string | null>(null)
 
-  // Overlap stays inert/cosmetic (FR-008, spec.md Assumptions) — it is not sent to the backend.
   const [overlapValue, setOverlapValue] = useState(50)
 
   const activeDocumentId = selectedDocumentId || documents[0]?.id || ''
@@ -28,8 +29,12 @@ export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenP
       setValidationError('Enter a chunk size greater than zero.')
       return
     }
+    if (overlapValue >= chunkSize) {
+      setValidationError('Overlap must be smaller than Chunk Size.')
+      return
+    }
     setValidationError(null)
-    run(activeDocumentId, chunkSize)
+    run(activeDocumentId, chunkSize, overlapValue)
   }
 
   return (
@@ -98,16 +103,31 @@ export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenP
                 >
                   Overlap
                 </label>
-                <input
-                  id="chunking-overlap"
-                  aria-label="Overlap"
-                  type="range"
-                  min={0}
-                  max={200}
-                  value={overlapValue}
-                  onChange={(event) => setOverlapValue(Number(event.target.value))}
-                  className="mt-1"
-                />
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    id="chunking-overlap"
+                    aria-label="Overlap"
+                    type="range"
+                    min={0}
+                    max={200}
+                    value={overlapValue}
+                    onChange={(event) => setOverlapValue(Number(event.target.value))}
+                  />
+                  <span
+                    data-testid="overlap-value"
+                    className="w-8 text-right text-sm tabular-nums text-on-surface"
+                  >
+                    {overlapValue}
+                  </span>
+                </div>
+                {status === 'success' && result && (
+                  <div
+                    data-testid="overlap-chunk-count"
+                    className="mt-1 text-right text-xs text-on-surface-variant"
+                  >
+                    {result.totalChunks} chunks
+                  </div>
+                )}
               </div>
 
               <div>
@@ -190,7 +210,21 @@ export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenP
               )}
             </div>
 
-            <div className="mt-4 flex shrink-0 justify-end gap-3 border-t border-outline-variant pt-4">
+            {saveStatus === 'error' && (
+              <p role="alert" className="mt-2 shrink-0 text-sm text-error">
+                Chunks could not be saved. Please try again.
+              </p>
+            )}
+
+            <div className="mt-4 flex shrink-0 items-center justify-end gap-3 border-t border-outline-variant pt-4">
+              {status === 'success' && (
+                <span
+                  data-testid="save-status-indicator"
+                  className="text-sm text-on-surface-variant"
+                >
+                  {isSaved ? 'Saved' : 'Not saved yet'}
+                </span>
+              )}
               <button
                 type="button"
                 onClick={handleRunChunking}
@@ -201,8 +235,16 @@ export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenP
               </button>
               <button
                 type="button"
+                onClick={() => save()}
+                disabled={status !== 'success' || saveStatus === 'saving'}
+                className="rounded border border-outline-variant px-4 py-2 text-sm font-medium text-on-surface disabled:opacity-50"
+              >
+                Save Chunks
+              </button>
+              <button
+                type="button"
                 onClick={() => onNavigate('embeddings')}
-                disabled={!hasSucceededOnce}
+                disabled={!hasSavedOnce}
                 className="rounded border border-outline-variant px-4 py-2 text-sm font-medium text-on-surface disabled:opacity-50"
               >
                 Move to Embeddings

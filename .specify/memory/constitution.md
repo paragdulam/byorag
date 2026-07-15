@@ -1,26 +1,24 @@
 <!--
 Sync Impact Report
 ==================
-Version change: [TEMPLATE] → 1.0.0 (initial concrete ratification)
+Version change: 1.0.0 → 1.1.0
 
-Modified principles: N/A (template placeholders filled for the first time)
+Modified principles:
+- IV. Fixed Technology Stack — expanded to add PostgreSQL as a fixed relational-database
+  component (alongside the existing Qdrant vector store), used for structured metadata
+  (corpora, documents, document-corpus associations, chunks). Qdrant itself was already
+  part of the stack — no change there. This is additive (a new stack element), not a
+  redefinition or removal of any existing choice, hence MINOR rather than MAJOR.
 
-Added sections:
-- I. Pluggable RAG Architecture (Experimentation-First)
-- II. Test-First, Test at Every Level (NON-NEGOTIABLE)
-- III. Single-User Simplicity (YAGNI)
-- IV. Fixed Technology Stack
-- V. Experiment Observability & Reproducibility
-- Technology Stack & Environment (Section 2)
-- Development Workflow (Section 3)
-- Governance
+Added sections: None (existing "Technology Stack & Environment" section gained one bullet)
 
-Removed sections: None (all placeholders replaced)
+Removed sections: None
 
 Templates requiring updates:
-- ✅ .specify/templates/plan-template.md — Constitution Check gate is generic/derived from this file, no edit needed
+- ✅ .specify/templates/plan-template.md — reviewed; Storage field in Technical Context is a
+  generic example placeholder, no edit needed
 - ✅ .specify/templates/spec-template.md — no constitution-specific references to update
-- ✅ .specify/templates/tasks-template.md — updated "Tests are OPTIONAL" note to reflect NON-NEGOTIABLE test principle
+- ✅ .specify/templates/tasks-template.md — no constitution-specific references to update
 - ✅ .specify/templates/checklist-template.md — reviewed, generic, no changes needed
 
 Follow-up TODOs: None
@@ -81,18 +79,24 @@ The application uses a fixed, agreed technology stack:
 - Frontend: React
 - Backend: Python
 - Vector store: Qdrant
+- Relational database: PostgreSQL (local), for structured metadata — corpora,
+  documents, document-corpus associations, and chunks
 - Source storage: local filesystem (PDFs)
 - Deployment: Docker (the application and its dependencies, including
-  Qdrant, MUST run via Docker/docker-compose)
+  Qdrant and PostgreSQL, MUST run via Docker/docker-compose)
 
 Changing any of these core stack choices (framework, language, vector
-database, or containerization approach) is a MAJOR governance decision and
-requires an explicit constitution amendment, not an ad-hoc implementation
-choice.
+database, relational database, or containerization approach) is a MAJOR
+governance decision and requires an explicit constitution amendment, not an
+ad-hoc implementation choice.
 
 **Rationale**: A fixed stack keeps the experimentation surface focused on
 RAG strategies themselves rather than on infrastructure churn, and ensures
-the app is reproducibly deployable via Docker.
+the app is reproducibly deployable via Docker. PostgreSQL was added
+alongside the vector store to give relational entities (corpora, documents,
+and their many-to-many/one-to-many relationships) real referential
+integrity — something the vector store and flat-file storage are not
+designed to provide.
 
 ### V. Experiment Observability & Reproducibility
 
@@ -113,10 +117,14 @@ defeats the purpose of an experimentation tool.
 - **Backend**: Python (any Python web framework is acceptable as long as it
   supports the pluggable-strategy and testing requirements above).
 - **Vector Database**: Qdrant, run as a containerized service.
+- **Relational Database**: PostgreSQL, run as a containerized service, storing
+  structured metadata — corpora, documents, document-corpus associations, and
+  chunks. Raw PDF bytes remain on the local filesystem (see Source Storage);
+  PostgreSQL stores their metadata and relationships.
 - **Source Storage**: PDFs are added by the user and stored on the local
   filesystem; no cloud object storage is required at this stage.
-- **Containerization**: The full application (frontend, backend, and
-  Qdrant) MUST be runnable via Docker/docker-compose for a consistent,
+- **Containerization**: The full application (frontend, backend, Qdrant, and
+  PostgreSQL) MUST be runnable via Docker/docker-compose for a consistent,
   reproducible local environment.
 - **Users**: Single local user. No multi-user auth system is in scope.
 
@@ -152,4 +160,4 @@ introducing multi-user auth, or a hardcoded non-pluggable pipeline stage)
 MUST be explicitly justified in the plan's Complexity Tracking section;
 unjustified violations MUST be simplified before implementation proceeds.
 
-**Version**: 1.0.0 | **Ratified**: 2026-07-04 | **Last Amended**: 2026-07-04
+**Version**: 1.1.0 | **Ratified**: 2026-07-04 | **Last Amended**: 2026-07-14
