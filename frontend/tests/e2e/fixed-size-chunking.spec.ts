@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { makeWordsPdf } from './fixtures/makePdf'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURES_DIR = path.join(__dirname, 'fixtures')
@@ -118,5 +119,86 @@ test.describe('Chunking Section Redesign & Embeddings Entry Point', () => {
     await moveToEmbeddings.click()
 
     await expect(page.getByRole('heading', { name: 'Embeddings' })).toBeVisible()
+  })
+
+  test('Save Chunks shows its own progress bar while saving (018-ui-polish-batch US4)', async ({ page }) => {
+    await page.goto('/')
+
+    const corpusName = `Save Progress E2E Fixture Corpus ${Date.now()}`
+    const main = page.locator('main')
+    await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
+    await main.getByRole('button', { name: /new corpus/i }).click()
+    await main.getByLabel(/new corpus name/i).fill(corpusName)
+    await main.getByRole('button', { name: /^create$/i }).click()
+    await expect(main.getByTestId(/corpus-row-/).filter({ hasText: corpusName })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
+
+    const chunkingPdf = path.join(FIXTURES_DIR, 'chunking-sample.pdf')
+    await page.setInputFiles('[data-testid="upload-browse-input"]', chunkingPdf)
+    await expect(page.getByText('chunking-sample.pdf').first()).toBeVisible()
+    await expect(page.getByText('PROCESSED').first()).toBeVisible({ timeout: 3000 })
+
+    await page.getByRole('link', { name: 'CHUNKING', exact: true }).click()
+    await page.getByRole('link', { name: 'FIXED SIZE CHUNKING', exact: true }).click()
+    await page.getByLabel('Select document').selectOption({ label: 'chunking-sample.pdf' })
+    await page.getByLabel('Chunk size').fill('10')
+    await page.getByLabel(/^overlap$/i).fill('0')
+    await page.getByRole('button', { name: 'Re-Calculate Chunks' }).click()
+    await expect(page.getByRole('progressbar')).toHaveCount(0)
+
+    const saveButton = page.getByRole('button', { name: 'Save Chunks' })
+    await saveButton.click()
+    // The save's own progress bar appears (same pattern as Embeddings' Save) and clears once
+    // the "Saved" indicator shows.
+    await expect(page.getByTestId('save-progress')).toBeVisible()
+    await expect(page.getByTestId('save-status-indicator')).toHaveText(/^saved$/i, { timeout: 15_000 })
+    await expect(page.getByTestId('save-progress')).toHaveCount(0)
+  })
+
+  test('Entire Corpus chunks and saves every document in one action (018-ui-polish-batch US1)', async ({
+    page,
+  }) => {
+    test.setTimeout(60_000)
+    await page.goto('/')
+
+    const suffix = Date.now()
+    const corpusName = `Entire Corpus Chunking E2E ${suffix}`
+    const main = page.locator('main')
+    await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
+    await main.getByRole('button', { name: /new corpus/i }).click()
+    await main.getByLabel(/new corpus name/i).fill(corpusName)
+    await main.getByRole('button', { name: /^create$/i }).click()
+    await expect(main.getByTestId(/corpus-row-/).filter({ hasText: corpusName })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
+
+    for (let i = 0; i < 3; i += 1) {
+      await page.setInputFiles('[data-testid="upload-browse-input"]', {
+        name: `entire-corpus-${suffix}-${i}.pdf`,
+        mimeType: 'application/pdf',
+        buffer: makeWordsPdf(30, `entirecorpus${suffix}word${i}`),
+      })
+      await expect(page.getByText(`entire-corpus-${suffix}-${i}.pdf`)).toBeVisible()
+    }
+
+    await page.getByRole('link', { name: 'CHUNKING', exact: true }).click()
+    await page.getByRole('link', { name: 'FIXED SIZE CHUNKING', exact: true }).click()
+    await page.getByLabel('Select document').selectOption({ label: 'Entire Corpus' })
+    await page.getByLabel('Chunk size').fill('10')
+    await page.getByLabel(/^overlap$/i).fill('0')
+    await page.getByRole('button', { name: 'Re-Calculate Chunks' }).click()
+
+    // Combined progress text appears while the batch runs.
+    await expect(page.getByText(/processing document \d+ of 3/i)).toBeVisible()
+    await expect(page.getByTestId('entire-corpus-summary')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('entire-corpus-summary').getByRole('listitem')).toHaveCount(3)
+
+    await page.getByRole('button', { name: 'Save Chunks' }).click()
+    await expect(page.getByRole('button', { name: 'Move to Embeddings' })).toBeEnabled({ timeout: 30_000 })
   })
 })

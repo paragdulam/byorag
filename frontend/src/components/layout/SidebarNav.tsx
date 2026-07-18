@@ -8,6 +8,7 @@ export type ScreenId =
   | 'embeddings'
   | 'vector-view'
   | 'playground'
+  | 'metrics'
 
 interface SubNavItem {
   label: string
@@ -32,7 +33,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Embeddings', screen: 'embeddings' },
   { label: 'Vector View', screen: 'vector-view' },
   { label: 'Playground', screen: 'playground' },
-  { label: 'Logs' },
+  { label: 'Metrics', screen: 'metrics' },
 ]
 
 const navLinkClassName = (isActive: boolean) =>

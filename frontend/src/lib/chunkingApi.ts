@@ -3,7 +3,7 @@ import type { SavedChunk } from '../types/embeddings'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 const CHUNKING_STREAM_ENDPOINT = `${API_BASE_URL}/api/chunking/run/stream`
-const CHUNKING_SAVE_ENDPOINT = `${API_BASE_URL}/api/chunking/save`
+const CHUNKING_SAVE_STREAM_ENDPOINT = `${API_BASE_URL}/api/chunking/save/stream`
 const CHUNKING_SAVED_CHUNKS_ENDPOINT = `${API_BASE_URL}/api/chunking/saved-chunks`
 
 export interface ChunkingStreamHandlers {
@@ -52,29 +52,42 @@ export function runChunkingStream(
 }
 
 /**
- * Recomputes and persists a chunking result for a document (contracts/chunking-save-api.md),
- * fully replacing any previously saved chunks for it. Strategy is not a parameter — same
- * "fixed-size"-only scope as `runChunkingStream`.
+ * Opens an SSE connection to the chunking save-stream endpoint
+ * (contracts/chunking-save-stream-api.md) and returns a function to close it early — mirrors
+ * `runChunkingStream`/`saveEmbeddingsStream`. Recomputes and persists a chunking result for a
+ * document, fully replacing any previously saved chunks for it. Strategy is not a parameter —
+ * same "fixed-size"-only scope as `runChunkingStream`.
  */
-export async function saveChunks(
+export function saveChunksStream(
   documentId: string,
   chunkSize: number,
   overlap: number,
-): Promise<ChunkRunResponse> {
-  const response = await fetch(CHUNKING_SAVE_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ documentId, chunkSize, overlap }),
+  { onProgress, onResult, onError }: ChunkingStreamHandlers,
+): () => void {
+  const url = `${CHUNKING_SAVE_STREAM_ENDPOINT}?documentId=${encodeURIComponent(documentId)}&chunkSize=${encodeURIComponent(String(chunkSize))}&overlap=${encodeURIComponent(String(overlap))}`
+  const source = new EventSource(url)
+
+  source.addEventListener('progress', (event) => {
+    const data = JSON.parse((event as MessageEvent).data) as ChunkProgressEvent
+    onProgress(data.percent)
   })
 
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
-    throw new Error(
-      typeof body.detail === 'string' ? body.detail : 'Failed to save chunks',
-    )
-  }
+  source.addEventListener('result', (event) => {
+    const data = JSON.parse((event as MessageEvent).data) as ChunkRunResponse
+    source.close()
+    onResult(data)
+  })
 
-  return (await response.json()) as ChunkRunResponse
+  source.addEventListener('error', (event) => {
+    const message =
+      'data' in event
+        ? (JSON.parse((event as MessageEvent).data) as { message: string }).message
+        : undefined
+    source.close()
+    onError(message)
+  })
+
+  return () => source.close()
 }
 
 /**

@@ -6,6 +6,7 @@ import { useVectorView } from '../../src/hooks/useVectorView'
 import type { UseVectorView } from '../../src/hooks/useVectorView'
 import type { SourceDocument } from '../../src/types/sourceDocument'
 import { CorpusProvider } from '../../src/context/CorpusContext'
+import { ENTIRE_CORPUS_SELECTION } from '../../src/lib/entireCorpusSelection'
 
 vi.mock('../../src/hooks/useVectorView')
 
@@ -44,6 +45,9 @@ function mockState(overrides: Partial<UseVectorView> = {}): UseVectorView {
       { id: 'umap', label: 'UMAP', available: false },
       { id: 'pca', label: 'PCA', available: false },
     ],
+    isEntireCorpus: false,
+    chunkGroups: [],
+    isLoadingChunkGroups: false,
     ...overrides,
   }
   mockedUseVectorView.mockReturnValue(state)
@@ -244,5 +248,83 @@ describe('VectorViewScreen — auto-selected document/chunk load saved data (015
 
     await userEvent.selectOptions(screen.getByLabelText(/select document/i), 'b.pdf')
     expect(lastHookCallArgs()[1]).toBe('b.pdf')
+  })
+})
+
+describe('VectorViewScreen — Entire Corpus (018-ui-polish-batch US8)', () => {
+  it('renders an Entire Corpus option in the document selector', () => {
+    mockState()
+
+    render(<VectorViewScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('option', { name: 'Entire Corpus' })).toBeInTheDocument()
+  })
+
+  it('renders chunkGroups grouped under a header per document', () => {
+    mockState({
+      isEntireCorpus: true,
+      chunkGroups: [
+        {
+          documentId: 'doc-a',
+          documentName: 'a.pdf',
+          chunks: [{ id: 'chunk-1', index: 0, content: 'a chunk text' }],
+        },
+        {
+          documentId: 'doc-b',
+          documentName: 'b.pdf',
+          chunks: [{ id: 'chunk-2', index: 0, content: 'b chunk text' }],
+        },
+      ],
+    })
+
+    render(<VectorViewScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByTestId('vector-view-chunk-group-doc-a')).toHaveTextContent('a.pdf')
+    expect(screen.getByTestId('vector-view-chunk-group-doc-a')).toHaveTextContent('a chunk text')
+    expect(screen.getByTestId('vector-view-chunk-group-doc-b')).toHaveTextContent('b.pdf')
+    expect(screen.getByTestId('vector-view-chunk-group-doc-b')).toHaveTextContent('b chunk text')
+  })
+
+  it('selecting a chunk from any group shows its own saved embedding, same as single-document mode', async () => {
+    const userEvent = (await import('@testing-library/user-event')).default
+    mockState({
+      isEntireCorpus: true,
+      chunkGroups: [
+        {
+          documentId: 'doc-a',
+          documentName: 'a.pdf',
+          chunks: [{ id: 'chunk-1', index: 0, content: 'a chunk text' }],
+        },
+      ],
+      savedEmbeddings: [
+        { id: 'emb-1', model: 'bert', createdAt: '2026-07-15T10:03:00Z', dims: 3, vector: [0.1, 0.2, 0.3] },
+      ],
+    })
+
+    render(<VectorViewScreen onNavigate={vi.fn()} />)
+
+    await userEvent.click(screen.getByLabelText(/select chunk 0/i))
+
+    const grid = screen.getByTestId('vector-grid')
+    expect(within(grid).getByText('0.1')).toBeInTheDocument()
+  })
+
+  it('shows the existing "no saved chunks yet" guidance when no document in the corpus has any', () => {
+    mockState({ isEntireCorpus: true, chunkGroups: [] })
+
+    render(<VectorViewScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByText(/no saved chunks for this document yet/i)).toBeInTheDocument()
+  })
+
+  it('calling the document selector with Entire Corpus passes the sentinel to useVectorView', async () => {
+    const userEvent = (await import('@testing-library/user-event')).default
+    mockState()
+
+    render(<VectorViewScreen onNavigate={vi.fn()} />)
+
+    await userEvent.selectOptions(screen.getByLabelText(/select document/i), 'Entire Corpus')
+
+    expect(lastHookCallArgs()[1]).toBe(ENTIRE_CORPUS_SELECTION)
   })
 })

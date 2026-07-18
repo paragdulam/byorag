@@ -10,8 +10,12 @@ export default defineConfig({
     proxy: {
       // Lets sourcesApi.ts use relative URLs in local dev without setting
       // VITE_API_BASE_URL; the backend is expected on :8000 (see
-      // specs/002-persist-pdf-sources/quickstart.md).
-      '/api': 'http://localhost:8000',
+      // specs/002-persist-pdf-sources/quickstart.md). E2E_API_PROXY_TARGET lets
+      // playwright.config.ts point this at its own isolated backend instance
+      // instead, so an e2e run never proxies into a developer's real dev server
+      // (post-020-metrics-stage-groups incident — e2e reused a live server bound
+      // to the real database and destructive tests corrupted real data).
+      '/api': process.env.E2E_API_PROXY_TARGET ?? 'http://localhost:8000',
     },
   },
   test: {

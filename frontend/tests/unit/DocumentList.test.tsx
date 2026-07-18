@@ -129,3 +129,22 @@ describe('DocumentList deletion (US2: bulk delete)', () => {
     expect(onDeleteDocuments.mock.calls[0][0]).toHaveLength(2)
   })
 })
+
+describe('DocumentList name wrapping (018-ui-polish-batch US3)', () => {
+  it('renders the document name cell with wrapping classes so it never forces the table wider', () => {
+    const documents = [makeDoc({ id: 'long.pdf', name: 'a-very-long-unbroken-token-name-with-no-spaces.pdf' })]
+
+    render(<DocumentList documents={documents} onExportCsv={vi.fn()} onDeleteDocuments={vi.fn()} />)
+
+    const cell = screen.getByText('a-very-long-unbroken-token-name-with-no-spaces.pdf')
+    expect(cell.className).toMatch(/break-words/)
+  })
+
+  it('uses a fixed table layout so the name column has a bounded width to wrap within', () => {
+    const documents = [makeDoc()]
+
+    render(<DocumentList documents={documents} onExportCsv={vi.fn()} onDeleteDocuments={vi.fn()} />)
+
+    expect(screen.getByRole('table').className).toMatch(/table-fixed/)
+  })
+})

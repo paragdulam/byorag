@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -17,6 +18,18 @@ MAX_CHUNKS = 200
 
 StreamEventType = Literal["progress", "result", "error"]
 StreamEvent = tuple[StreamEventType, dict[str, int] | dict[str, str] | ChunkRunResponse]
+
+_ChunkComputationStepType = Literal["progress", "computed"]
+
+
+@dataclass
+class _ChunkComputation:
+    extraction_failed: bool
+    chunks: list[Chunk]
+    total_chunks: int
+
+
+_ChunkComputationStep = tuple[_ChunkComputationStepType, dict[str, int] | _ChunkComputation]
 
 
 def extract_text_pages(pdf_path: Path) -> tuple[int, Iterator[str]]:
@@ -94,14 +107,14 @@ def _persist_chunks(
     db.commit()
 
 
-def stream_chunking(
+def _stream_chunk_computation(
     document: Document, chunk_size: int, strategy: str, overlap: int = 0
-) -> Iterator[StreamEvent]:
-    """Yields ("progress", {"percent": int}) events as pages are extracted (0-90, real
-    per-page progress — research.md §1), then a terminal ("result", ChunkRunResponse)
-    event. This is a pure preview — it never writes to the database; persisting a
-    result requires a separate explicit call to `save_chunks` (012-save-chunks-button
-    research.md §1, §3)."""
+) -> Iterator[_ChunkComputationStep]:
+    """Shared extraction-and-chunk-and-progress loop used by both `stream_chunking` (preview)
+    and `save_chunks_stream` (persist) — mirrors `app/embeddings/service.py`'s `_stream_embed`
+    reuse pattern (018-ui-polish-batch research.md §4). Yields `("progress", {"percent": int})`
+    events as pages are extracted (0-90, real per-page progress — research.md §1 from `012`),
+    then a final `("computed", _ChunkComputation)` step."""
     strategy_impl = STRATEGIES[strategy]
     total_pages, pages = extract_text_pages(Path(document.storage_path))
 
@@ -115,19 +128,42 @@ def stream_chunking(
 
     text = "\n".join(page_texts).strip()
     if not text:
-        yield "result", ChunkRunResponse(extractionFailed=True, result=None)
+        yield "computed", _ChunkComputation(extraction_failed=True, chunks=[], total_chunks=0)
         return
 
     pieces = strategy_impl.chunk(text, chunk_size, overlap)
     total_chunks = len(pieces)
     capped_pieces = pieces[:MAX_CHUNKS]
     chunks = [Chunk(index=i, content=content) for i, content in enumerate(capped_pieces)]
+    yield "computed", _ChunkComputation(
+        extraction_failed=False, chunks=chunks, total_chunks=total_chunks
+    )
+
+
+def stream_chunking(
+    document: Document, chunk_size: int, strategy: str, overlap: int = 0
+) -> Iterator[StreamEvent]:
+    """Yields ("progress", {"percent": int}) events as pages are extracted, then a terminal
+    ("result", ChunkRunResponse) event. This is a pure preview — it never writes to the
+    database; persisting a result requires a separate explicit call to `save_chunks_stream`
+    (012-save-chunks-button research.md §1, §3; streamed since 018-ui-polish-batch)."""
+    computation: _ChunkComputation | None = None
+    for kind, payload in _stream_chunk_computation(document, chunk_size, strategy, overlap):
+        if kind == "progress":
+            yield "progress", payload
+        else:
+            computation = payload
+
+    assert computation is not None
+    if computation.extraction_failed:
+        yield "result", ChunkRunResponse(extractionFailed=True, result=None)
+        return
 
     yield "result", ChunkRunResponse(
         extractionFailed=False,
         result=ChunkingResult(
-            chunks=chunks,
-            totalChunks=total_chunks,
+            chunks=computation.chunks,
+            totalChunks=computation.total_chunks,
             strategy=strategy,
             chunkSize=chunk_size,
             overlap=overlap,
@@ -146,32 +182,32 @@ def list_saved_chunks(db: Session, document_id: str) -> list[ChunkRow]:
     )
 
 
-def save_chunks(
+def save_chunks_stream(
     db: Session, document: Document, chunk_size: int, strategy: str, overlap: int = 0
-) -> ChunkRunResponse:
-    """Recomputes the chunking result for `document` (deterministic given the same
-    inputs — 012-save-chunks-button research.md §1) and persists it, fully replacing
-    any previously saved chunks for that document. No progress reporting — this is a
-    single-shot call, unlike `stream_chunking`'s preview path."""
-    strategy_impl = STRATEGIES[strategy]
-    _, pages = extract_text_pages(Path(document.storage_path))
-    text = "\n".join(pages).strip()
+) -> Iterator[StreamEvent]:
+    """Same extraction-and-chunk-and-progress loop as `stream_chunking` (real page-by-page
+    progress, not a simulated animation — 018-ui-polish-batch research.md §4), then persists
+    the result, fully replacing any previously saved chunks for the document
+    (012-save-chunks-button research.md §1)."""
+    computation: _ChunkComputation | None = None
+    for kind, payload in _stream_chunk_computation(document, chunk_size, strategy, overlap):
+        if kind == "progress":
+            yield "progress", payload
+        else:
+            computation = payload
 
-    if not text:
-        return ChunkRunResponse(extractionFailed=True, result=None)
+    assert computation is not None
+    if computation.extraction_failed:
+        yield "result", ChunkRunResponse(extractionFailed=True, result=None)
+        return
 
-    pieces = strategy_impl.chunk(text, chunk_size, overlap)
-    total_chunks = len(pieces)
-    capped_pieces = pieces[:MAX_CHUNKS]
-    chunks = [Chunk(index=i, content=content) for i, content in enumerate(capped_pieces)]
+    _persist_chunks(db, document.id, computation.chunks, strategy, chunk_size, overlap)
 
-    _persist_chunks(db, document.id, chunks, strategy, chunk_size, overlap)
-
-    return ChunkRunResponse(
+    yield "result", ChunkRunResponse(
         extractionFailed=False,
         result=ChunkingResult(
-            chunks=chunks,
-            totalChunks=total_chunks,
+            chunks=computation.chunks,
+            totalChunks=computation.total_chunks,
             strategy=strategy,
             chunkSize=chunk_size,
             overlap=overlap,

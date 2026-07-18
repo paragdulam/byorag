@@ -41,8 +41,8 @@ def test_saved_embeddings_survive_independent_of_the_request_session(
         )
         document_id = upload.json()["documents"][0]["id"]
 
-        save_chunks = real_client.post(
-            "/api/chunking/save", json={"documentId": document_id, "chunkSize": 5}
+        save_chunks = real_client.get(
+            "/api/chunking/save/stream", params={"documentId": document_id, "chunkSize": 5}
         )
         assert save_chunks.status_code == 200
 

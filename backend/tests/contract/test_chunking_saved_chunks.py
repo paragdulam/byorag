@@ -16,7 +16,7 @@ def test_saved_chunks_returns_previously_saved_chunks_in_order(
     client: TestClient, corpus_id: str
 ) -> None:
     document_id = upload_pdf(client, corpus_id, "report.pdf", make_words_pdf(20))
-    client.post("/api/chunking/save", json={"documentId": document_id, "chunkSize": 5})
+    client.get("/api/chunking/save/stream", params={"documentId": document_id, "chunkSize": 5})
 
     response = client.get("/api/chunking/saved-chunks", params={"documentId": document_id})
 

@@ -25,7 +25,7 @@ def _upload_save_chunks_and_embeddings(
         files={"files": (name, content, "application/pdf")},
     )
     document_id = upload.json()["documents"][0]["id"]
-    client.post("/api/chunking/save", json={"documentId": document_id, "chunkSize": chunk_size})
+    client.get("/api/chunking/save/stream", params={"documentId": document_id, "chunkSize": chunk_size})
     client.get("/api/embeddings/save/stream", params={"documentId": document_id, "model": "bert"})
     return document_id
 
@@ -59,7 +59,7 @@ def test_full_cycle_create_generate_list_and_survives_rechunk(
     # Re-chunk the document (deletes and replaces its Chunk/Embedding rows —
     # 012-save-chunks-button / 016 data-model.md assumption) with a different chunk size so
     # the new Chunk rows are genuinely different from the ones the turn originally matched.
-    client.post("/api/chunking/save", json={"documentId": document_id, "chunkSize": 3})
+    client.get("/api/chunking/save/stream", params={"documentId": document_id, "chunkSize": 3})
 
     # The turn's chunk snapshots survive: content/index/score — the durable record
     # (research.md Decision 1) — are unchanged, even though the original Chunk/Embedding

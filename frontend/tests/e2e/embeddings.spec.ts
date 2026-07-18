@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { makeWordsPdf } from './fixtures/makePdf'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURES_DIR = path.join(__dirname, 'fixtures')
@@ -117,5 +118,72 @@ test.describe('Generate and Save Chunk Embeddings', () => {
     await expect(page.getByTestId('save-status-indicator')).toHaveText(/not saved/i)
     await page.getByRole('button', { name: 'Save Chunks' }).click()
     await expect(page.getByTestId('save-status-indicator')).toHaveText(/^saved$/i)
+  })
+
+  test('Entire Corpus generates and saves embeddings for every document, skipping one with no saved chunks (018-ui-polish-batch US2)', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000)
+    await page.goto('/')
+
+    const suffix = Date.now()
+    const corpusName = `Entire Corpus Embeddings E2E ${suffix}`
+    const main = page.locator('main')
+    await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
+    await main.getByRole('button', { name: /new corpus/i }).click()
+    await main.getByLabel(/new corpus name/i).fill(corpusName)
+    await main.getByRole('button', { name: /^create$/i }).click()
+    await expect(main.getByTestId(/corpus-row-/).filter({ hasText: corpusName })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
+
+    // Two documents get saved chunks; a third is left with none, to exercise the
+    // skip-and-report path (FR-021). Real, extractable PDFs (not raw byte buffers) — the
+    // word itself is unique per run/document so content-hash dedup never collides with a
+    // previous run's upload (002-persist-pdf-sources).
+    for (let i = 0; i < 2; i += 1) {
+      await page.setInputFiles('[data-testid="upload-browse-input"]', {
+        name: `entire-embed-${suffix}-${i}.pdf`,
+        mimeType: 'application/pdf',
+        buffer: makeWordsPdf(30, `entireembed${suffix}word${i}`),
+      })
+      await expect(page.getByText(`entire-embed-${suffix}-${i}.pdf`)).toBeVisible()
+    }
+    await page.setInputFiles('[data-testid="upload-browse-input"]', {
+      name: `entire-embed-${suffix}-nochunks.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeWordsPdf(30, `entireembed${suffix}nochunks`),
+    })
+    await expect(page.getByText(`entire-embed-${suffix}-nochunks.pdf`)).toBeVisible()
+
+    await page.getByRole('link', { name: 'CHUNKING', exact: true }).click()
+    await page.getByRole('link', { name: 'FIXED SIZE CHUNKING', exact: true }).click()
+    for (let i = 0; i < 2; i += 1) {
+      await page.getByLabel('Select document').selectOption({ label: `entire-embed-${suffix}-${i}.pdf` })
+      await page.getByLabel('Chunk size').fill('10')
+      await page.getByLabel(/^overlap$/i).fill('0')
+      await page.getByRole('button', { name: 'Re-Calculate Chunks' }).click()
+      await expect(page.getByRole('progressbar')).toHaveCount(0)
+      await page.getByRole('button', { name: 'Save Chunks' }).click()
+      await expect(page.getByTestId('save-status-indicator')).toHaveText(/^saved$/i)
+    }
+
+    await page.getByRole('link', { name: 'EMBEDDINGS', exact: true }).click()
+    await page.getByLabel('Select document').selectOption({ label: 'Entire Corpus' })
+    await page.getByRole('button', { name: 'Generate Embeddings' }).click()
+
+    await expect(page.getByTestId('entire-corpus-summary')).toBeVisible({ timeout: 30_000 })
+    const summary = page.getByTestId('entire-corpus-summary')
+    await expect(summary.getByRole('listitem')).toHaveCount(3)
+    // The no-saved-chunks document is reported as a failure (not silently dropped or
+    // treated as a success) — the other two report a real generated-embeddings count.
+    const noChunksRow = summary.getByRole('listitem').filter({ hasText: 'nochunks' })
+    await expect(noChunksRow.getByRole('alert')).toBeVisible()
+    await expect(summary.getByText(/embeddings generated/i)).toHaveCount(2)
+
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page.getByTestId('entire-corpus-summary')).toBeVisible({ timeout: 30_000 })
   })
 })

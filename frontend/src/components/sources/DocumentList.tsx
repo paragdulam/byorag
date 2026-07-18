@@ -111,17 +111,17 @@ export function DocumentList({
         </div>
       </div>
 
-      <table className="w-full text-left">
+      <table className="w-full table-fixed text-left">
         <thead>
           <tr className="font-mono text-xs tracking-widest text-on-surface-variant">
-            <th className="px-6 py-3 font-medium">
+            <th className="w-10 px-6 py-3 font-medium">
               <span className="sr-only">Select</span>
             </th>
             <th className="px-6 py-3 font-medium">DOCUMENT NAME</th>
-            <th className="px-6 py-3 font-medium">SIZE</th>
-            <th className="px-6 py-3 font-medium">UPLOAD DATE</th>
-            <th className="px-6 py-3 font-medium">STATUS</th>
-            <th className="px-6 py-3 text-right font-medium">
+            <th className="w-24 px-6 py-3 font-medium">SIZE</th>
+            <th className="w-40 px-6 py-3 font-medium">UPLOAD DATE</th>
+            <th className="w-32 px-6 py-3 font-medium">STATUS</th>
+            <th className="w-64 px-6 py-3 text-right font-medium">
               <span className="sr-only">Actions</span>
             </th>
           </tr>
@@ -139,7 +139,7 @@ export function DocumentList({
                   />
                 )}
               </td>
-              <td className="px-6 py-4 text-on-surface">{doc.name}</td>
+              <td className="break-words px-6 py-4 text-on-surface">{doc.name}</td>
               <td className="px-6 py-4 text-on-surface-variant">{formatFileSize(doc.sizeBytes)}</td>
               <td className="px-6 py-4 text-on-surface-variant">{formatUploadedAt(doc.uploadedAt)}</td>
               <td className="px-6 py-4">
@@ -148,7 +148,7 @@ export function DocumentList({
               <td className="px-6 py-4 text-right">
                 {doc.status === 'processed' && (
                   <div className="flex items-center justify-end gap-2">
-                    {onAttachToCorpus && otherCorpora.length > 0 && (
+                    {/* {onAttachToCorpus && otherCorpora.length > 0 && (
                       <select
                         aria-label={`Add ${doc.name} to another corpus`}
                         defaultValue=""
@@ -170,8 +170,8 @@ export function DocumentList({
                           </option>
                         ))}
                       </select>
-                    )}
-                    {onRemoveFromCorpus && (
+                    )} */}
+                    {/* {onRemoveFromCorpus && (
                       <button
                         type="button"
                         aria-label={`Remove ${doc.name} from this corpus`}
@@ -180,7 +180,7 @@ export function DocumentList({
                       >
                         Remove from Corpus
                       </button>
-                    )}
+                    )} */}
                     <button
                       type="button"
                       aria-label={`Delete ${doc.name}`}

@@ -2,6 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Chunk as ChunkRow
+from app.db.models import Document, DocumentCorpus
 from app.db.models import Embedding as EmbeddingRow
 from app.retrieval.strategies.base import RETRIEVAL_STRATEGIES
 
@@ -27,6 +28,39 @@ class CosineSimilarityStrategy:
             select(EmbeddingRow.chunk_id, EmbeddingRow.id.label("embedding_id"), distance.label("distance"))
             .join(ChunkRow, ChunkRow.id == EmbeddingRow.chunk_id)
             .where(ChunkRow.document_id == document_id, EmbeddingRow.model == model)
+            .distinct(EmbeddingRow.chunk_id)
+            .order_by(EmbeddingRow.chunk_id, distance.asc())
+            .subquery()
+        )
+
+        rows = db.execute(
+            select(ChunkRow, best_per_chunk.c.embedding_id, best_per_chunk.c.distance)
+            .join(best_per_chunk, ChunkRow.id == best_per_chunk.c.chunk_id)
+            .order_by(best_per_chunk.c.distance.asc())
+            .limit(limit)
+        ).all()
+
+        return [(chunk, embedding_id, 1 - dist) for chunk, embedding_id, dist in rows]
+
+    def search_corpus(
+        self,
+        db: Session,
+        corpus_id: str,
+        model: str,
+        query_vector: list[float],
+        limit: int,
+    ) -> list[tuple[ChunkRow, str, float]]:
+        """Same ranking as `search`, but scoped to every document currently linked to
+        `corpus_id` instead of a single document — one global top-`limit` across the corpus
+        (019-metrics-dashboard research.md Decision 4)."""
+        distance = EmbeddingRow.vector.cosine_distance(query_vector)
+
+        best_per_chunk = (
+            select(EmbeddingRow.chunk_id, EmbeddingRow.id.label("embedding_id"), distance.label("distance"))
+            .join(ChunkRow, ChunkRow.id == EmbeddingRow.chunk_id)
+            .join(Document, Document.id == ChunkRow.document_id)
+            .join(DocumentCorpus, DocumentCorpus.document_id == Document.id)
+            .where(DocumentCorpus.corpus_id == corpus_id, EmbeddingRow.model == model)
             .distinct(EmbeddingRow.chunk_id)
             .order_by(EmbeddingRow.chunk_id, distance.asc())
             .subquery()

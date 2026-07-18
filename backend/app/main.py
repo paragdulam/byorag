@@ -9,6 +9,7 @@ from app.corpora.router import router as corpora_router
 from app.db.base import Base, SessionLocal, check_database_connection, engine, ensure_vector_extension
 from app.db.legacy_migration import migrate_legacy_pdfs
 from app.embeddings.router import router as embeddings_router
+from app.metrics.router import router as metrics_router
 from app.playground.router import router as playground_router
 from app.sources.router import router as sources_router
 from app.system.router import router as system_router
@@ -43,3 +44,4 @@ app.include_router(system_router)
 app.include_router(chunking_router)
 app.include_router(embeddings_router)
 app.include_router(playground_router)
+app.include_router(metrics_router)

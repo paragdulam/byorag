@@ -41,8 +41,8 @@ def test_data_survives_independent_of_the_request_session(real_client: TestClien
         )
         document_id = upload.json()["documents"][0]["id"]
 
-        save = real_client.post(
-            "/api/chunking/save", json={"documentId": document_id, "chunkSize": 5}
+        save = real_client.get(
+            "/api/chunking/save/stream", params={"documentId": document_id, "chunkSize": 5}
         )
         assert save.status_code == 200
 

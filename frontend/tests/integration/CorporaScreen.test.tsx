@@ -88,7 +88,9 @@ describe('Cross-section scoping from the Corpora screen (009-corpora-screen US2)
   async function switchToCorpusBViaCorporaScreen() {
     await userEvent.click(screen.getByText('CORPORA'))
     await waitFor(() => expect(screen.getByTestId('corpus-row-corpus-b')).toBeInTheDocument())
-    await userEvent.click(screen.getByTestId('corpus-row-corpus-b'))
+    // Row clicks no longer switch the active corpus (018-ui-polish-batch US5) — only the
+    // row's own explicit "Make Active" button does.
+    await userEvent.click(screen.getByRole('button', { name: /make corpus b active/i }))
   }
 
   it('switching the active corpus from the Corpora screen immediately updates Sources, no reload', async () => {

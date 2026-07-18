@@ -237,7 +237,23 @@ def _save(
     resolved = service.resolve_run(
         db_session, document_id=document.id, chunk_size=chunk_size, strategy=strategy, overlap=overlap
     )
-    return service.save_chunks(db_session, resolved, chunk_size, strategy, overlap=overlap)
+    events = list(
+        service.save_chunks_stream(db_session, resolved, chunk_size, strategy, overlap=overlap)
+    )
+    assert events[-1][0] == "result"
+    return events
+
+
+def test_save_chunks_stream_emits_progress_before_the_terminal_result(
+    db_session: Session, tmp_path: Path
+) -> None:
+    document = _make_document(db_session, tmp_path, "short.pdf", make_words_pdf(20))
+
+    events = _save(db_session, document, 5)
+
+    progress_events = [e for e in events if e[0] == "progress"]
+    assert len(progress_events) >= 1
+    assert events[-1][0] == "result"
 
 
 def test_save_chunks_persists_matching_strategy_size_overlap_and_content(
@@ -245,7 +261,8 @@ def test_save_chunks_persists_matching_strategy_size_overlap_and_content(
 ) -> None:
     document = _make_document(db_session, tmp_path, "short.pdf", make_words_pdf(20))
 
-    response = _save(db_session, document, 5)
+    events = _save(db_session, document, 5)
+    response = events[-1][1]
 
     assert response.extractionFailed is False
     assert response.result is not None
@@ -285,7 +302,8 @@ def test_save_chunks_no_extractable_text_persists_nothing(
 ) -> None:
     document = _make_document(db_session, tmp_path, "empty.pdf", make_words_pdf(0))
 
-    response = _save(db_session, document, 10)
+    events = _save(db_session, document, 10)
+    response = events[-1][1]
 
     assert response.extractionFailed is True
     assert response.result is None

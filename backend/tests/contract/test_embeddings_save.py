@@ -34,7 +34,7 @@ def upload_and_save_chunks(
         files={"files": (name, content, "application/pdf")},
     )
     document_id = upload.json()["documents"][0]["id"]
-    client.post("/api/chunking/save", json={"documentId": document_id, "chunkSize": chunk_size})
+    client.get("/api/chunking/save/stream", params={"documentId": document_id, "chunkSize": chunk_size})
     return document_id
 
 

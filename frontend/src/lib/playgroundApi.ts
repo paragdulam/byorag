@@ -9,13 +9,19 @@ const PLAYGROUND_TURNS_ENDPOINT = `${API_BASE_URL}/api/playground/turns`
 export class QueryTooLongError extends Error {}
 
 /**
- * Reads a document's currently active chunking strategy and embedding model
- * (contracts/playground-api.md) — server-driven, so the Playground's context display
- * (and the model a turn is created with) always reflects what was actually saved.
+ * Reads a document's or an entire corpus's currently active chunking strategy and embedding
+ * model (contracts/playground-api.md; corpus scope added by
+ * contracts/playground-corpus-scope-api.md) — server-driven, so the Playground's context
+ * display (and the model a turn is created with) always reflects what was actually saved.
  */
-export async function getPlaygroundContext(documentId: string): Promise<PlaygroundContext> {
-  const url = `${PLAYGROUND_CONTEXT_ENDPOINT}?documentId=${encodeURIComponent(documentId)}`
-  const response = await fetch(url)
+export async function getPlaygroundContext(
+  scope: { documentId: string } | { corpusId: string },
+): Promise<PlaygroundContext> {
+  const params =
+    'documentId' in scope
+      ? `documentId=${encodeURIComponent(scope.documentId)}`
+      : `corpusId=${encodeURIComponent(scope.corpusId)}`
+  const response = await fetch(`${PLAYGROUND_CONTEXT_ENDPOINT}?${params}`)
 
   if (!response.ok) {
     throw new Error(`Failed to load playground context: ${response.status}`)
@@ -66,10 +72,16 @@ export async function generateAnswer(turnId: string): Promise<Turn> {
   return (await response.json()) as Turn
 }
 
-/** A document's full persisted conversation, oldest first (FR-017's automatic reload). */
-export async function listTurns(documentId: string): Promise<ListTurnsResponse> {
-  const url = `${PLAYGROUND_TURNS_ENDPOINT}?documentId=${encodeURIComponent(documentId)}`
-  const response = await fetch(url)
+/** A document's or an entire corpus's full persisted conversation, oldest first (FR-017's
+ * automatic reload; corpus scope added by contracts/playground-corpus-scope-api.md). */
+export async function listTurns(
+  scope: { documentId: string } | { corpusId: string },
+): Promise<ListTurnsResponse> {
+  const params =
+    'documentId' in scope
+      ? `documentId=${encodeURIComponent(scope.documentId)}`
+      : `corpusId=${encodeURIComponent(scope.corpusId)}`
+  const response = await fetch(`${PLAYGROUND_TURNS_ENDPOINT}?${params}`)
 
   if (!response.ok) {
     throw new Error(`Failed to load conversation: ${response.status}`)

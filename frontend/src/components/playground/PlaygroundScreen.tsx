@@ -3,6 +3,7 @@ import { AppShell } from '../layout/AppShell'
 import type { ScreenId } from '../layout/SidebarNav'
 import { usePlaygroundConversation } from '../../hooks/usePlaygroundConversation'
 import { useCorpus } from '../../context/CorpusContext'
+import { ENTIRE_CORPUS_SELECTION, isEntireCorpusSelection } from '../../lib/entireCorpusSelection'
 import { ConversationPanel } from './ConversationPanel'
 import { RetrievalPanel } from './RetrievalPanel'
 
@@ -31,12 +32,19 @@ export function PlaygroundScreen({ onNavigate }: PlaygroundScreenProps) {
   // Keeps selectedDocumentId itself valid once documents load, so the hook call above
   // receives the auto-selected document — otherwise, with only one document, nothing
   // ever sets selectedDocumentId and context/conversation never load (015-fix-saved-chunks-
-  // not-showing established this exact pattern for Embeddings/Vector View).
+  // not-showing established this exact pattern for Embeddings/Vector View). "Entire Corpus" is
+  // always a valid selection regardless of the current document list (018-ui-polish-batch) —
+  // it must never be reset back to a single document here.
   useEffect(() => {
-    setSelectedDocumentId((prev) => (documents.some((doc) => doc.id === prev) ? prev : documents[0]?.id ?? ''))
+    setSelectedDocumentId((prev) =>
+      documents.some((doc) => doc.id === prev) || isEntireCorpusSelection(prev)
+        ? prev
+        : (documents[0]?.id ?? ''),
+    )
   }, [documents])
 
   const activeDocumentId = selectedDocumentId || documents[0]?.id || ''
+  const isEntireCorpus = isEntireCorpusSelection(activeDocumentId)
 
   // The right panel reflects the selected turn, defaulting to the most recently submitted
   // question (spec FR-010) — User Story 2 lets the user override this by clicking a past
@@ -80,6 +88,7 @@ export function PlaygroundScreen({ onNavigate }: PlaygroundScreenProps) {
                 onChange={(event) => setSelectedDocumentId(event.target.value)}
                 className="mt-1 rounded border border-outline-variant bg-surface p-2 text-on-surface"
               >
+                <option value={ENTIRE_CORPUS_SELECTION}>Entire Corpus</option>
                 {documents.map((doc) => (
                   <option key={doc.id} value={doc.id}>
                     {doc.name}
@@ -97,8 +106,8 @@ export function PlaygroundScreen({ onNavigate }: PlaygroundScreenProps) {
               </p>
               {context !== null && context.embeddingModel === null && (
                 <p className="mt-1 text-on-surface-variant">
-                  No saved embeddings for this document yet. Generate and save embeddings from the
-                  Embeddings screen first.
+                  No saved embeddings for {isEntireCorpus ? 'this corpus' : 'this document'} yet.
+                  Generate and save embeddings from the Embeddings screen first.
                 </p>
               )}
             </div>
