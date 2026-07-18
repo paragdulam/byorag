@@ -1,39 +1,39 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { useFixedSizeChunking } from '../../src/hooks/useFixedSizeChunking'
+import { ENTIRE_CORPUS_SELECTION } from '../../src/lib/entireCorpusSelection'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status })
 }
 
-/**
- * Stubs `fetch` for both the document-list GET (`/api/sources`) and the save POST
- * (`/api/chunking/save`), routing by URL/method so both `useFixedSizeChunking`'s
- * initial load and `save()` can be exercised in the same test.
- */
-function stubFetch(options: { saveResponse?: unknown; saveStatus?: number } = {}) {
-  const { saveResponse = { extractionFailed: false, result: null }, saveStatus = 200 } = options
+const SINGLE_DOC = [
+  {
+    id: 'report.pdf',
+    name: 'report.pdf',
+    sizeBytes: 1024,
+    uploadedAt: '2026-07-13T10:00:00Z',
+    status: 'processed',
+  },
+]
+
+const THREE_DOCS = [
+  { id: 'doc-a', name: 'a.pdf', sizeBytes: 1024, uploadedAt: '2026-07-13T10:00:00Z', status: 'processed' },
+  { id: 'doc-b', name: 'b.pdf', sizeBytes: 1024, uploadedAt: '2026-07-13T10:00:00Z', status: 'processed' },
+  { id: 'doc-c', name: 'c.pdf', sizeBytes: 1024, uploadedAt: '2026-07-13T10:00:00Z', status: 'processed' },
+]
+
+/** Stubs `fetch` for the document-list GET (`/api/sources`) only — run/save now both go
+ * through the mocked `EventSource` below. */
+function stubFetch(docs: unknown[] = SINGLE_DOC) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.includes('/api/chunking/save')) {
-        return jsonResponse(saveResponse, saveStatus)
-      }
       if (url.includes('/api/sources')) {
-        return jsonResponse({
-          documents: [
-            {
-              id: 'report.pdf',
-              name: 'report.pdf',
-              sizeBytes: 1024,
-              uploadedAt: '2026-07-13T10:00:00Z',
-              status: 'processed',
-            },
-          ],
-        })
+        return jsonResponse({ documents: docs })
       }
-      throw new Error(`Unexpected fetch: ${init?.method ?? 'GET'} ${url}`)
+      throw new Error(`Unexpected fetch: ${url}`)
     }),
   )
 }
@@ -69,6 +69,19 @@ class MockEventSource {
   }
 }
 
+function chunkResult(chunkSize: number, overlap = 0) {
+  return {
+    extractionFailed: false,
+    result: {
+      chunks: [{ index: 0, content: 'hello' }],
+      totalChunks: 1,
+      strategy: 'fixed-size',
+      chunkSize,
+      overlap,
+    },
+  }
+}
+
 async function renderAndRun(chunkSize = 50, overlap = 0) {
   const { result } = renderHook(() => useFixedSizeChunking('corpus-1'))
   await waitFor(() => expect(result.current.documents).toHaveLength(1))
@@ -77,16 +90,7 @@ async function renderAndRun(chunkSize = 50, overlap = 0) {
     result.current.run('report.pdf', chunkSize, overlap)
   })
   act(() => {
-    MockEventSource.latest().emit('result', {
-      extractionFailed: false,
-      result: {
-        chunks: [{ index: 0, content: 'hello' }],
-        totalChunks: 1,
-        strategy: 'fixed-size',
-        chunkSize,
-        overlap,
-      },
-    })
+    MockEventSource.latest().emit('result', chunkResult(chunkSize, overlap))
   })
 
   return result
@@ -126,16 +130,7 @@ describe('useFixedSizeChunking', () => {
     expect(result.current.progressPercent).toBe(45)
 
     act(() => {
-      MockEventSource.latest().emit('result', {
-        extractionFailed: false,
-        result: {
-          chunks: [{ index: 0, content: 'hello' }],
-          totalChunks: 1,
-          strategy: 'fixed-size',
-          chunkSize: 50,
-          overlap: 0,
-        },
-      })
+      MockEventSource.latest().emit('result', chunkResult(50))
     })
 
     expect(result.current.status).toBe('success')
@@ -208,19 +203,8 @@ describe('useFixedSizeChunking', () => {
     expect(result.current.hasSavedOnce).toBe(false)
   })
 
-  it('save() POSTs the last run parameters and transitions saveStatus idle -> saving -> success', async () => {
-    stubFetch({
-      saveResponse: {
-        extractionFailed: false,
-        result: {
-          chunks: [{ index: 0, content: 'hello' }],
-          totalChunks: 1,
-          strategy: 'fixed-size',
-          chunkSize: 50,
-          overlap: 20,
-        },
-      },
-    })
+  it('save() streams progress and transitions saveStatus idle -> saving -> success', async () => {
+    stubFetch()
     vi.stubGlobal('EventSource', MockEventSource)
     MockEventSource.instances = []
 
@@ -232,6 +216,22 @@ describe('useFixedSizeChunking', () => {
       savePromise = result.current.save()
     })
     expect(result.current.saveStatus).toBe('saving')
+    expect(result.current.saveProgressPercent).toBe(0)
+
+    const saveSource = MockEventSource.latest()
+    expect(saveSource.url).toContain('/api/chunking/save/stream')
+    expect(saveSource.url).toContain('documentId=report.pdf')
+    expect(saveSource.url).toContain('chunkSize=50')
+    expect(saveSource.url).toContain('overlap=20')
+
+    act(() => {
+      saveSource.emit('progress', { percent: 60 })
+    })
+    expect(result.current.saveProgressPercent).toBe(60)
+
+    act(() => {
+      saveSource.emit('result', chunkResult(50, 20))
+    })
 
     await act(async () => {
       await savePromise
@@ -239,29 +239,24 @@ describe('useFixedSizeChunking', () => {
 
     expect(result.current.saveStatus).toBe('success')
     expect(result.current.hasSavedOnce).toBe(true)
-
-    const saveCall = vi
-      .mocked(fetch)
-      .mock.calls.find(([input]) => String(input).includes('/api/chunking/save'))
-    expect(saveCall).toBeDefined()
-    const [, init] = saveCall!
-    expect(init?.method).toBe('POST')
-    expect(JSON.parse(init!.body as string)).toEqual({
-      documentId: 'report.pdf',
-      chunkSize: 50,
-      overlap: 20,
-    })
   })
 
-  it('save() sets saveStatus to error and leaves hasSavedOnce false when the request fails', async () => {
-    stubFetch({ saveResponse: { detail: 'boom' }, saveStatus: 500 })
+  it('save() sets saveStatus to error and leaves hasSavedOnce false when the stream reports an error', async () => {
+    stubFetch()
     vi.stubGlobal('EventSource', MockEventSource)
     MockEventSource.instances = []
 
     const result = await renderAndRun()
 
+    let savePromise: Promise<void> | undefined
+    act(() => {
+      savePromise = result.current.save()
+    })
+    act(() => {
+      MockEventSource.latest().emit('error', { message: 'boom' })
+    })
     await act(async () => {
-      await result.current.save()
+      await savePromise
     })
 
     expect(result.current.saveStatus).toBe('error')
@@ -274,8 +269,15 @@ describe('useFixedSizeChunking', () => {
     MockEventSource.instances = []
 
     const result = await renderAndRun()
+    let savePromise: Promise<void> | undefined
+    act(() => {
+      savePromise = result.current.save()
+    })
+    act(() => {
+      MockEventSource.latest().emit('result', chunkResult(50))
+    })
     await act(async () => {
-      await result.current.save()
+      await savePromise
     })
     expect(result.current.hasSavedOnce).toBe(true)
 
@@ -306,8 +308,15 @@ describe('useFixedSizeChunking', () => {
     MockEventSource.instances = []
 
     const result = await renderAndRun(50, 20)
+    let savePromise: Promise<void> | undefined
+    act(() => {
+      savePromise = result.current.save()
+    })
+    act(() => {
+      MockEventSource.latest().emit('result', chunkResult(50, 20))
+    })
     await act(async () => {
-      await result.current.save()
+      await savePromise
     })
 
     expect(result.current.isSaved).toBe(true)
@@ -319,8 +328,15 @@ describe('useFixedSizeChunking', () => {
     MockEventSource.instances = []
 
     const result = await renderAndRun(50, 20)
+    let savePromise: Promise<void> | undefined
+    act(() => {
+      savePromise = result.current.save()
+    })
+    act(() => {
+      MockEventSource.latest().emit('result', chunkResult(50, 20))
+    })
     await act(async () => {
-      await result.current.save()
+      await savePromise
     })
     expect(result.current.isSaved).toBe(true)
 
@@ -328,23 +344,145 @@ describe('useFixedSizeChunking', () => {
       result.current.run('report.pdf', 50, 20)
     })
     act(() => {
-      MockEventSource.latest().emit('result', {
-        extractionFailed: false,
-        result: {
-          chunks: [{ index: 0, content: 'hello' }],
-          totalChunks: 1,
-          strategy: 'fixed-size',
-          chunkSize: 50,
-          overlap: 20,
-        },
-      })
+      MockEventSource.latest().emit('result', chunkResult(50, 20))
     })
 
     expect(result.current.isSaved).toBe(false)
 
+    act(() => {
+      savePromise = result.current.save()
+    })
+    act(() => {
+      MockEventSource.latest().emit('result', chunkResult(50, 20))
+    })
     await act(async () => {
-      await result.current.save()
+      await savePromise
     })
     expect(result.current.isSaved).toBe(true)
+  })
+
+  describe('Entire Corpus', () => {
+    it('runs chunking for every document sequentially, reporting batchProgress and batchResults', async () => {
+      stubFetch(THREE_DOCS)
+      vi.stubGlobal('EventSource', MockEventSource)
+      MockEventSource.instances = []
+
+      const { result } = renderHook(() => useFixedSizeChunking('corpus-1'))
+      await waitFor(() => expect(result.current.documents).toHaveLength(3))
+
+      act(() => {
+        result.current.run(ENTIRE_CORPUS_SELECTION, 50)
+      })
+
+      expect(result.current.isEntireCorpus).toBe(true)
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+      expect(MockEventSource.latest().url).toContain('documentId=doc-a')
+      expect(result.current.batchProgress).toMatchObject({ index: 0, total: 3, documentId: 'doc-a' })
+      act(() => {
+        MockEventSource.latest().emit('result', chunkResult(50))
+      })
+
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
+      expect(MockEventSource.latest().url).toContain('documentId=doc-b')
+      act(() => {
+        MockEventSource.latest().emit('result', chunkResult(50))
+      })
+
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(3))
+      expect(MockEventSource.latest().url).toContain('documentId=doc-c')
+      act(() => {
+        MockEventSource.latest().emit('result', chunkResult(50))
+      })
+
+      await waitFor(() => expect(result.current.status).toBe('success'))
+      expect(result.current.batchProgress).toBeNull()
+      expect(result.current.batchResults.map((r) => r.documentId)).toEqual(['doc-a', 'doc-b', 'doc-c'])
+      expect(result.current.batchResults.every((r) => r.status === 'success')).toBe(true)
+    })
+
+    it('records a per-document failure and still completes/saves the rest', async () => {
+      stubFetch(THREE_DOCS)
+      vi.stubGlobal('EventSource', MockEventSource)
+      MockEventSource.instances = []
+
+      const { result } = renderHook(() => useFixedSizeChunking('corpus-1'))
+      await waitFor(() => expect(result.current.documents).toHaveLength(3))
+
+      act(() => {
+        result.current.run(ENTIRE_CORPUS_SELECTION, 50)
+      })
+
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+      act(() => {
+        MockEventSource.latest().emit('result', chunkResult(50))
+      })
+
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
+      act(() => {
+        MockEventSource.latest().emit('error', { message: 'extraction failed' })
+      })
+
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(3))
+      act(() => {
+        MockEventSource.latest().emit('result', chunkResult(50))
+      })
+
+      await waitFor(() => expect(result.current.status).toBe('success'))
+      expect(result.current.batchResults.map((r) => r.status)).toEqual(['success', 'failed', 'success'])
+
+      // Save persists only the documents that were part of the batch; the runner reuses
+      // the shared chunkSize/overlap for each document's own save/stream call.
+      act(() => {
+        void result.current.save()
+      })
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(4))
+      act(() => {
+        MockEventSource.latest().emit('result', chunkResult(50))
+      })
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(5))
+      act(() => {
+        MockEventSource.latest().emit('result', chunkResult(50))
+      })
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(6))
+      act(() => {
+        MockEventSource.latest().emit('result', chunkResult(50))
+      })
+
+      await waitFor(() => expect(result.current.saveStatus).toBe('success'))
+      expect(result.current.hasSavedOnce).toBe(true)
+    })
+
+    it('treats a document whose result reports extractionFailed as a batch failure, not a success', async () => {
+      stubFetch(THREE_DOCS)
+      vi.stubGlobal('EventSource', MockEventSource)
+      MockEventSource.instances = []
+
+      const { result } = renderHook(() => useFixedSizeChunking('corpus-1'))
+      await waitFor(() => expect(result.current.documents).toHaveLength(3))
+
+      act(() => {
+        result.current.run(ENTIRE_CORPUS_SELECTION, 50)
+      })
+
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+      act(() => {
+        // Extraction failure is a normal, successfully-received terminal `result` event
+        // (never a stream `error` event) — this must still count as a per-document failure.
+        MockEventSource.latest().emit('result', { extractionFailed: true, result: null })
+      })
+
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
+      act(() => {
+        MockEventSource.latest().emit('result', chunkResult(50))
+      })
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(3))
+      act(() => {
+        MockEventSource.latest().emit('result', chunkResult(50))
+      })
+
+      await waitFor(() => expect(result.current.status).toBe('success'))
+      expect(result.current.batchResults.map((r) => r.status)).toEqual(['failed', 'success', 'success'])
+      expect(result.current.batchResults[0].errorMessage).toMatch(/could not be extracted/i)
+    })
   })
 })

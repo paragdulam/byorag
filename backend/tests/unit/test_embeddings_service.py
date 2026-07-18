@@ -33,7 +33,7 @@ def _make_saved_chunks(
     resolved = chunking_service.resolve_run(
         db_session, document_id=document.id, chunk_size=chunk_size, strategy="fixed-size"
     )
-    chunking_service.save_chunks(db_session, resolved, chunk_size, "fixed-size")
+    list(chunking_service.save_chunks_stream(db_session, resolved, chunk_size, "fixed-size"))
     db_session.refresh(document)
     return document
 

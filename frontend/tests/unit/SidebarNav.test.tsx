@@ -42,7 +42,7 @@ describe('SidebarNav', () => {
     expect(screen.queryByText('EXPERIMENTS')).not.toBeInTheDocument()
     expect(screen.getByText('PLAYGROUND')).toBeInTheDocument()
     expect(screen.getByText('VECTOR VIEW')).toBeInTheDocument()
-    expect(screen.getByText('LOGS')).toBeInTheDocument()
+    expect(screen.getByText('METRICS')).toBeInTheDocument()
 
     expect(screen.getByText('SOURCES')).toHaveAttribute('aria-current', 'page')
     expect(screen.getByText('CHUNKING')).not.toHaveAttribute('aria-current')

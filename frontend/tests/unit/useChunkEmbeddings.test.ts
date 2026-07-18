@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { useChunkEmbeddings } from '../../src/hooks/useChunkEmbeddings'
+import { ENTIRE_CORPUS_SELECTION } from '../../src/lib/entireCorpusSelection'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status })
@@ -37,7 +38,13 @@ class MockEventSource {
   }
 }
 
-function stubFetch() {
+const THREE_DOCS = [
+  { id: 'doc-a', name: 'a.pdf', sizeBytes: 1024, uploadedAt: '2026-07-13T10:00:00Z', status: 'processed' },
+  { id: 'doc-b', name: 'b.pdf', sizeBytes: 1024, uploadedAt: '2026-07-13T10:00:00Z', status: 'processed' },
+  { id: 'doc-c', name: 'c.pdf', sizeBytes: 1024, uploadedAt: '2026-07-13T10:00:00Z', status: 'processed' },
+]
+
+function stubFetch(docs: unknown[] | null = null) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -58,7 +65,7 @@ function stubFetch() {
       }
       if (url.includes('/api/sources')) {
         return jsonResponse({
-          documents: [
+          documents: docs ?? [
             {
               id: 'report.pdf',
               name: 'report.pdf',
@@ -381,6 +388,78 @@ describe('useChunkEmbeddings — save() (013-bert-pgvector-embeddings US3)', () 
     act(() => {
       MockEventSource.latest().emit('error')
     })
+    expect(result.current.hasSavedOnce).toBe(true)
+  })
+})
+
+describe('useChunkEmbeddings — Entire Corpus (018-ui-polish-batch US2)', () => {
+  it('generates embeddings for every document sequentially, skipping and reporting one with no saved chunks', async () => {
+    stubFetch(THREE_DOCS)
+    vi.stubGlobal('EventSource', MockEventSource)
+    MockEventSource.instances = []
+
+    const { result } = renderHook(() => useChunkEmbeddings('corpus-1', ENTIRE_CORPUS_SELECTION))
+    await waitFor(() => expect(result.current.documents).toHaveLength(3))
+    expect(result.current.isEntireCorpus).toBe(true)
+    expect(result.current.savedChunks).toEqual([])
+
+    act(() => {
+      result.current.generate(ENTIRE_CORPUS_SELECTION, 'bert')
+    })
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    expect(MockEventSource.latest().url).toContain('documentId=doc-a')
+    act(() => {
+      MockEventSource.latest().emit('result', { documentId: 'doc-a', model: 'bert', vectors: [] })
+    })
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
+    act(() => {
+      MockEventSource.latest().emit('error', { message: 'Document has no saved chunks to embed' })
+    })
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(3))
+    act(() => {
+      MockEventSource.latest().emit('result', { documentId: 'doc-c', model: 'bert', vectors: [] })
+    })
+
+    await waitFor(() => expect(result.current.generateStatus).toBe('success'))
+    expect(result.current.batchResults.map((r) => r.status)).toEqual(['success', 'failed', 'success'])
+    expect(result.current.batchResults[1].errorMessage).toMatch(/no saved chunks/i)
+  })
+
+  it('saves embeddings for every document sequentially using the batch model', async () => {
+    stubFetch(THREE_DOCS)
+    vi.stubGlobal('EventSource', MockEventSource)
+    MockEventSource.instances = []
+
+    const { result } = renderHook(() => useChunkEmbeddings('corpus-1', ENTIRE_CORPUS_SELECTION))
+    await waitFor(() => expect(result.current.documents).toHaveLength(3))
+
+    act(() => {
+      result.current.generate(ENTIRE_CORPUS_SELECTION, 'bert')
+    })
+    for (let i = 0; i < 3; i += 1) {
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(i + 1))
+      act(() => {
+        MockEventSource.latest().emit('result', { documentId: 'doc', model: 'bert', vectors: [] })
+      })
+    }
+    await waitFor(() => expect(result.current.generateStatus).toBe('success'))
+
+    act(() => {
+      result.current.save()
+    })
+    expect(result.current.saveStatus).toBe('saving')
+
+    for (let i = 0; i < 3; i += 1) {
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(4 + i))
+      act(() => {
+        MockEventSource.latest().emit('result', { documentId: 'doc', model: 'bert', savedCount: 2 })
+      })
+    }
+
+    await waitFor(() => expect(result.current.saveStatus).toBe('success'))
     expect(result.current.hasSavedOnce).toBe(true)
   })
 })

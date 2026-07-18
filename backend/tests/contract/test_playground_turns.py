@@ -18,7 +18,7 @@ def upload_save_chunks_and_embeddings(
         files={"files": (name, content, "application/pdf")},
     )
     document_id = upload.json()["documents"][0]["id"]
-    client.post("/api/chunking/save", json={"documentId": document_id, "chunkSize": chunk_size})
+    client.get("/api/chunking/save/stream", params={"documentId": document_id, "chunkSize": chunk_size})
     client.get("/api/embeddings/save/stream", params={"documentId": document_id, "model": model})
     return document_id
 
@@ -47,7 +47,7 @@ def test_create_turn_success_persists_and_returns_ranked_chunks(
     assert body["error"] is None
     assert body["answeredAt"] is None
     for chunk in body["chunks"]:
-        assert set(chunk.keys()) == {"chunkId", "index", "content", "score"}
+        assert set(chunk.keys()) == {"chunkId", "documentId", "index", "content", "score"}
 
 
 def test_create_turn_unknown_document_returns_404(client: TestClient) -> None:
@@ -79,7 +79,7 @@ def test_create_turn_no_saved_embeddings_returns_400(client: TestClient, corpus_
         files={"files": ("report.pdf", make_words_pdf(10), "application/pdf")},
     )
     document_id = upload.json()["documents"][0]["id"]
-    client.post("/api/chunking/save", json={"documentId": document_id, "chunkSize": 5})
+    client.get("/api/chunking/save/stream", params={"documentId": document_id, "chunkSize": 5})
 
     response = client.post(
         "/api/playground/turns",

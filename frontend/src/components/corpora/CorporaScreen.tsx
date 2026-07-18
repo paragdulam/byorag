@@ -1,4 +1,4 @@
-import { useEffect, useState, type SubmitEvent } from 'react'
+import { useEffect, useMemo, useState, type SubmitEvent } from 'react'
 import { AppShell } from '../layout/AppShell'
 import type { ScreenId } from '../layout/SidebarNav'
 import { useCorpus } from '../../context/CorpusContext'
@@ -14,12 +14,57 @@ export interface CorporaScreenProps {
   onNavigate: (screen: ScreenId) => void
 }
 
+const DOCUMENT_PREVIEW_LIMIT = 5
+
+function CorpusRowDocumentPreview({
+  corpusId,
+  documents,
+  isExpanded,
+  onToggleExpanded,
+}: {
+  corpusId: string
+  documents: DocumentWithCorpora[]
+  isExpanded: boolean
+  onToggleExpanded: () => void
+}) {
+  if (documents.length === 0) {
+    return (
+      <p className="text-sm text-on-surface-variant" data-testid={`corpus-row-${corpusId}-documents`}>
+        No documents in this corpus yet.
+      </p>
+    )
+  }
+
+  const visibleDocuments = isExpanded ? documents : documents.slice(0, DOCUMENT_PREVIEW_LIMIT)
+
+  return (
+    <div data-testid={`corpus-row-${corpusId}-documents`}>
+      <ul className="flex flex-col gap-1 text-sm text-on-surface-variant">
+        {visibleDocuments.map((doc) => (
+          <li key={doc.id}>{doc.name}</li>
+        ))}
+      </ul>
+      {documents.length > DOCUMENT_PREVIEW_LIMIT && (
+        <button
+          type="button"
+          onClick={onToggleExpanded}
+          className="mt-1 text-xs font-medium text-primary"
+        >
+          {isExpanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 function CorpusDocumentsPanel({
   corpusId,
   corpusName,
+  onDocumentsChanged,
 }: {
   corpusId: string
   corpusName: string
+  onDocumentsChanged: () => void
 }) {
   const [documents, setDocuments] = useState<SourceDocument[]>([])
   const [allDocuments, setAllDocuments] = useState<DocumentWithCorpora[]>([])
@@ -50,6 +95,9 @@ function CorpusDocumentsPanel({
     try {
       await attachDocumentToCorpus(documentId, corpusId)
       refresh()
+      // Keeps each corpus row's own document preview (018-ui-polish-batch US7) in sync —
+      // it's driven by a separate, screen-level fetch of the same data, not this panel's.
+      onDocumentsChanged()
     } catch (attachError) {
       setError(attachError instanceof Error ? attachError.message : 'Failed to add document')
     }
@@ -59,6 +107,7 @@ function CorpusDocumentsPanel({
     try {
       await removeDocumentFromCorpus(documentId, corpusId)
       refresh()
+      onDocumentsChanged()
     } catch (removeError) {
       setError(removeError instanceof Error ? removeError.message : 'Failed to remove document')
     }
@@ -140,6 +189,40 @@ export function CorporaScreen({ onNavigate }: CorporaScreenProps) {
   const [newCorpusName, setNewCorpusName] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [allDocuments, setAllDocuments] = useState<DocumentWithCorpora[]>([])
+  const [expandedCorpusIds, setExpandedCorpusIds] = useState<Set<string>>(new Set())
+
+  const refreshAllDocuments = () => {
+    listAllSources().then(setAllDocuments)
+  }
+
+  useEffect(() => {
+    refreshAllDocuments()
+  }, [])
+
+  const documentsByCorpus = useMemo(() => {
+    const map = new Map<string, DocumentWithCorpora[]>()
+    for (const doc of allDocuments) {
+      for (const corpusId of doc.corpusIds) {
+        const list = map.get(corpusId) ?? []
+        list.push(doc)
+        map.set(corpusId, list)
+      }
+    }
+    return map
+  }, [allDocuments])
+
+  const toggleExpanded = (corpusId: string) => {
+    setExpandedCorpusIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(corpusId)) {
+        next.delete(corpusId)
+      } else {
+        next.add(corpusId)
+      }
+      return next
+    })
+  }
 
   const activeCorpus = corpora.find((corpus) => corpus.id === activeCorpusId) ?? null
 
@@ -261,53 +344,44 @@ export function CorporaScreen({ onNavigate }: CorporaScreenProps) {
                     key={corpus.id}
                     data-testid={`corpus-row-${corpus.id}`}
                     aria-current={isActive ? 'page' : undefined}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => selectCorpus(corpus.id)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault()
-                        selectCorpus(corpus.id)
-                      }
-                    }}
                     className={
-                      'flex w-full items-center justify-between border-b border-outline-variant px-6 py-4 last:border-b-0 ' +
-                      (isActive
-                        ? 'bg-primary-container/20 text-on-surface'
-                        : 'cursor-pointer text-on-surface hover:bg-surface-container-high')
+                      'flex w-full flex-col gap-3 border-b border-outline-variant px-6 py-4 last:border-b-0 text-on-surface ' +
+                      (isActive ? 'bg-primary-container/20' : '')
                     }
                   >
-                    <span>{corpus.name}</span>
-                    <div className="flex items-center gap-3">
-                      {isActive ? (
-                        <span className="text-xs font-medium tracking-wide text-primary">
-                          ACTIVE
-                        </span>
-                      ) : (
+                    <div className="flex items-center justify-between">
+                      <span>{corpus.name}</span>
+                      <div className="flex items-center gap-3">
+                        {isActive ? (
+                          <span className="text-xs font-medium tracking-wide text-primary">
+                            ACTIVE
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            aria-label={`Make ${corpus.name} active`}
+                            onClick={() => selectCorpus(corpus.id)}
+                            className="rounded border border-outline-variant px-3 py-1 text-sm text-on-surface hover:bg-surface-container-high"
+                          >
+                            Make Active
+                          </button>
+                        )}
                         <button
                           type="button"
-                          aria-label={`Make ${corpus.name} active`}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            selectCorpus(corpus.id)
-                          }}
-                          className="rounded border border-outline-variant px-3 py-1 text-sm text-on-surface hover:bg-surface-container-high"
+                          aria-label={`Delete ${corpus.name}`}
+                          onClick={() => void handleDeleteRow(corpus.id, corpus.name)}
+                          className="rounded border border-error/40 px-3 py-1 text-sm text-error hover:bg-error-container/10"
                         >
-                          Make Active
+                          Delete
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        aria-label={`Delete ${corpus.name}`}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          void handleDeleteRow(corpus.id, corpus.name)
-                        }}
-                        className="rounded border border-error/40 px-3 py-1 text-sm text-error hover:bg-error-container/10"
-                      >
-                        Delete
-                      </button>
+                      </div>
                     </div>
+                    <CorpusRowDocumentPreview
+                      corpusId={corpus.id}
+                      documents={documentsByCorpus.get(corpus.id) ?? []}
+                      isExpanded={expandedCorpusIds.has(corpus.id)}
+                      onToggleExpanded={() => toggleExpanded(corpus.id)}
+                    />
                   </li>
                 )
               })}
@@ -317,7 +391,11 @@ export function CorporaScreen({ onNavigate }: CorporaScreenProps) {
       )}
 
       {activeCorpus && (
-        <CorpusDocumentsPanel corpusId={activeCorpus.id} corpusName={activeCorpus.name} />
+        <CorpusDocumentsPanel
+          corpusId={activeCorpus.id}
+          corpusName={activeCorpus.name}
+          onDocumentsChanged={refreshAllDocuments}
+        />
       )}
     </AppShell>
   )

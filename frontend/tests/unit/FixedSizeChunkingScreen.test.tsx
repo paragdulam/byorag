@@ -7,6 +7,7 @@ import { useFixedSizeChunking } from '../../src/hooks/useFixedSizeChunking'
 import type { UseFixedSizeChunking } from '../../src/hooks/useFixedSizeChunking'
 import type { SourceDocument } from '../../src/types/sourceDocument'
 import { CorpusProvider } from '../../src/context/CorpusContext'
+import { ENTIRE_CORPUS_SELECTION } from '../../src/lib/entireCorpusSelection'
 
 vi.mock('../../src/hooks/useFixedSizeChunking')
 
@@ -38,8 +39,12 @@ function mockState(overrides: Partial<UseFixedSizeChunking> = {}): UseFixedSizeC
     progressPercent: 0,
     result: null,
     saveStatus: 'idle',
+    saveProgressPercent: 0,
     hasSavedOnce: false,
     isSaved: false,
+    isEntireCorpus: false,
+    batchProgress: null,
+    batchResults: [],
     run: vi.fn(),
     save: vi.fn(),
     ...overrides,
@@ -448,5 +453,115 @@ describe('FixedSizeChunkingScreen — saved/unsaved indicator (012-save-chunks-b
     render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
 
     expect(screen.getByTestId('save-status-indicator')).toHaveTextContent(/^saved$/i)
+  })
+})
+
+describe('FixedSizeChunkingScreen — Entire Corpus (018-ui-polish-batch US1)', () => {
+  it('renders an Entire Corpus option in the document selector', () => {
+    mockState()
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('option', { name: 'Entire Corpus' })).toBeInTheDocument()
+  })
+
+  it('calls run with the Entire Corpus sentinel when selected and Re-Calculate Chunks is clicked', async () => {
+    const state = mockState()
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    await userEvent.selectOptions(screen.getByLabelText(/select document/i), 'Entire Corpus')
+    await userEvent.click(screen.getByRole('button', { name: /re-calculate chunks/i }))
+
+    expect(state.run).toHaveBeenCalledWith(ENTIRE_CORPUS_SELECTION, 512, 50)
+  })
+
+  it('shows combined progress and the current document while an Entire Corpus run is in progress', () => {
+    mockState({
+      status: 'running',
+      isEntireCorpus: true,
+      batchProgress: { index: 2, total: 12, documentId: 'doc-x', documentName: 'name.pdf', documentPercent: 42 },
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    const progressBar = screen.getByRole('progressbar')
+    expect(progressBar).toHaveAttribute('aria-valuenow', '20')
+    expect(screen.getByText(/processing document 3 of 12 \(name\.pdf\)/i)).toBeInTheDocument()
+  })
+
+  it('shows a per-document summary after an Entire Corpus run completes', () => {
+    mockState({
+      status: 'success',
+      isEntireCorpus: true,
+      batchResults: [
+        {
+          documentId: 'doc-a',
+          documentName: 'a.pdf',
+          status: 'success',
+          result: {
+            extractionFailed: false,
+            result: { chunks: [], totalChunks: 8, strategy: 'fixed-size', chunkSize: 50, overlap: 0 },
+          },
+        },
+        {
+          documentId: 'doc-b',
+          documentName: 'b.pdf',
+          status: 'failed',
+          errorMessage: 'Chunking failed',
+        },
+      ],
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    const summary = screen.getByTestId('entire-corpus-summary')
+    expect(within(summary).getByText('a.pdf')).toBeInTheDocument()
+    expect(within(summary).getByText(/8 chunks/)).toBeInTheDocument()
+    expect(within(summary).getByText('b.pdf')).toBeInTheDocument()
+    expect(within(summary).getByText(/chunking failed/i)).toBeInTheDocument()
+  })
+})
+
+describe('FixedSizeChunkingScreen — Save Chunks progress (018-ui-polish-batch US4)', () => {
+  it('shows a progress bar and percentage while saveStatus is saving', () => {
+    mockState({
+      status: 'success',
+      result: { chunks: [], totalChunks: 0, strategy: 'fixed-size', chunkSize: 50, overlap: 0 },
+      saveStatus: 'saving',
+      saveProgressPercent: 65,
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    const saveProgress = screen.getByTestId('save-progress')
+    expect(within(saveProgress).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '65')
+    expect(within(saveProgress).getByText(/65%/)).toBeInTheDocument()
+  })
+
+  it('replaces the save progress bar with the Saved indicator once saving succeeds', () => {
+    mockState({
+      status: 'success',
+      result: { chunks: [], totalChunks: 0, strategy: 'fixed-size', chunkSize: 50, overlap: 0 },
+      saveStatus: 'success',
+      isSaved: true,
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.queryByTestId('save-progress')).not.toBeInTheDocument()
+    expect(screen.getByTestId('save-status-indicator')).toHaveTextContent(/^saved$/i)
+  })
+
+  it('disables Save Chunks while saveStatus is saving', () => {
+    mockState({
+      status: 'success',
+      result: { chunks: [], totalChunks: 0, strategy: 'fixed-size', chunkSize: 50, overlap: 0 },
+      saveStatus: 'saving',
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: /save chunks/i })).toBeDisabled()
   })
 })

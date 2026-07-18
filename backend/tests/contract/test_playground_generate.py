@@ -76,7 +76,7 @@ def test_create_turn_without_saved_embeddings_never_reaches_generate(
         files={"files": ("report.pdf", make_words_pdf(10), "application/pdf")},
     )
     document_id = upload.json()["documents"][0]["id"]
-    client.post("/api/chunking/save", json={"documentId": document_id, "chunkSize": 5})
+    client.get("/api/chunking/save/stream", params={"documentId": document_id, "chunkSize": 5})
 
     response = client.post(
         "/api/playground/turns",

@@ -1,12 +1,19 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { useVectorView } from '../../src/hooks/useVectorView'
+import { ENTIRE_CORPUS_SELECTION } from '../../src/lib/entireCorpusSelection'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status })
 }
 
-function stubFetch() {
+const THREE_DOCS = [
+  { id: 'doc-a', name: 'a.pdf', sizeBytes: 1024, uploadedAt: '2026-07-13T10:00:00Z', status: 'processed' },
+  { id: 'doc-b', name: 'b.pdf', sizeBytes: 1024, uploadedAt: '2026-07-13T10:00:00Z', status: 'processed' },
+  { id: 'doc-c', name: 'c.pdf', sizeBytes: 1024, uploadedAt: '2026-07-13T10:00:00Z', status: 'processed' },
+]
+
+function stubFetch(docs: unknown[] | null = null) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -44,6 +51,9 @@ function stubFetch() {
         })
       }
       if (url.includes('/api/chunking/saved-chunks')) {
+        if (url.includes('documentId=doc-b')) {
+          return jsonResponse({ chunks: [] })
+        }
         return jsonResponse({
           chunks: [
             { id: 'chunk-1', index: 0, content: 'first chunk text' },
@@ -53,7 +63,7 @@ function stubFetch() {
       }
       if (url.includes('/api/sources')) {
         return jsonResponse({
-          documents: [
+          documents: docs ?? [
             {
               id: 'report.pdf',
               name: 'report.pdf',
@@ -137,5 +147,47 @@ describe('useVectorView', () => {
     await waitFor(() => expect(result.current.projectionMethods).toHaveLength(3))
     const vector = result.current.projectionMethods.find((m) => m.id === 'vector')
     expect(vector).toEqual({ id: 'vector', label: 'Vector', available: true })
+  })
+})
+
+describe('useVectorView — Entire Corpus (018-ui-polish-batch US8)', () => {
+  it('is entire-corpus mode when the selection is the sentinel', () => {
+    stubFetch(THREE_DOCS)
+
+    const { result } = renderHook(() => useVectorView('corpus-1', ENTIRE_CORPUS_SELECTION, null))
+
+    expect(result.current.isEntireCorpus).toBe(true)
+  })
+
+  it('builds chunkGroups from every document with saved chunks, in document order, omitting ones with none', async () => {
+    stubFetch(THREE_DOCS)
+
+    const { result } = renderHook(() => useVectorView('corpus-1', ENTIRE_CORPUS_SELECTION, null))
+    await waitFor(() => expect(result.current.documents).toHaveLength(3))
+
+    await waitFor(() => expect(result.current.chunkGroups).toHaveLength(2))
+    expect(result.current.chunkGroups.map((g) => g.documentId)).toEqual(['doc-a', 'doc-c'])
+    expect(result.current.chunkGroups[0].chunks).toHaveLength(2)
+    expect(result.current.savedChunks).toEqual([])
+  })
+
+  it('does not treat entire-corpus selection as a single document for savedChunks', async () => {
+    stubFetch(THREE_DOCS)
+
+    const { result } = renderHook(() => useVectorView('corpus-1', ENTIRE_CORPUS_SELECTION, null))
+    await waitFor(() => expect(result.current.documents).toHaveLength(3))
+
+    expect(result.current.savedChunks).toEqual([])
+    expect(result.current.isLoadingSavedChunks).toBe(false)
+  })
+
+  it('leaves chunkGroups empty and non-entire-corpus behavior unaffected for a single-document selection', async () => {
+    stubFetch(THREE_DOCS)
+
+    const { result } = renderHook(() => useVectorView('corpus-1', 'doc-a', null))
+    await waitFor(() => expect(result.current.savedChunks).toHaveLength(2))
+
+    expect(result.current.isEntireCorpus).toBe(false)
+    expect(result.current.chunkGroups).toEqual([])
   })
 })

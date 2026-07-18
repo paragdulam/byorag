@@ -1,17 +1,20 @@
 export interface PlaygroundContext {
-  documentId: string
+  documentId: string | null
+  corpusId: string | null
   chunkingStrategy: string | null
   embeddingModel: string | null
 }
 
 export interface CreateTurnRequest {
-  documentId: string
+  documentId?: string | null
+  corpusId?: string | null
   model: string
   query: string
 }
 
 export interface TurnChunk {
   chunkId: string
+  documentId: string | null
   index: number
   content: string
   score: number
@@ -19,6 +22,9 @@ export interface TurnChunk {
 
 export interface Turn {
   id: string
+  scope: 'document' | 'corpus'
+  documentId: string | null
+  corpusId: string | null
   question: string
   queryEmbedding: number[]
   chunks: TurnChunk[]
@@ -32,6 +38,7 @@ export interface Turn {
 }
 
 export interface ListTurnsResponse {
-  documentId: string
+  documentId: string | null
+  corpusId: string | null
   turns: Turn[]
 }

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { EmbeddingGenerateResult, EmbeddingModelOption, SavedChunk } from '../types/embeddings'
+import type {
+  EmbeddingGenerateResult,
+  EmbeddingModelOption,
+  EmbeddingSaveResult,
+  SavedChunk,
+} from '../types/embeddings'
 import type { SourceDocument } from '../types/sourceDocument'
 import {
   generateEmbeddingsStream,
@@ -8,9 +13,39 @@ import {
 } from '../lib/embeddingsApi'
 import { listSavedChunks } from '../lib/chunkingApi'
 import { listSources } from '../lib/sourcesApi'
+import { isEntireCorpusSelection } from '../lib/entireCorpusSelection'
+import { runSequentialBatch, type BatchItemResult, type BatchProgress } from '../lib/batchRunner'
 
 export type EmbeddingsGenerateStatus = 'idle' | 'generating' | 'success' | 'error'
 export type EmbeddingsSaveStatus = 'idle' | 'saving' | 'success' | 'error'
+
+function generateEmbeddingsStreamAsPromise(
+  documentId: string,
+  model: string,
+  onDocumentProgress: (percent: number) => void,
+): Promise<EmbeddingGenerateResult> {
+  return new Promise((resolve, reject) => {
+    generateEmbeddingsStream(documentId, model, {
+      onProgress: onDocumentProgress,
+      onResult: (result) => resolve(result),
+      onError: (message) => reject(new Error(message ?? 'Failed to generate embeddings')),
+    })
+  })
+}
+
+function saveEmbeddingsStreamAsPromise(
+  documentId: string,
+  model: string,
+  onDocumentProgress: (percent: number) => void,
+): Promise<EmbeddingSaveResult> {
+  return new Promise((resolve, reject) => {
+    saveEmbeddingsStream(documentId, model, {
+      onProgress: onDocumentProgress,
+      onResult: (result) => resolve(result),
+      onError: (message) => reject(new Error(message ?? 'Failed to save embeddings')),
+    })
+  })
+}
 
 export interface UseChunkEmbeddings {
   documents: SourceDocument[]
@@ -21,11 +56,14 @@ export interface UseChunkEmbeddings {
   generateStatus: EmbeddingsGenerateStatus
   progressPercent: number
   preview: EmbeddingGenerateResult | null
-  generate: (documentId: string, model: string) => void
+  generate: (selection: string, model: string) => void
   saveStatus: EmbeddingsSaveStatus
   saveProgressPercent: number
   save: () => void
   hasSavedOnce: boolean
+  isEntireCorpus: boolean
+  batchProgress: BatchProgress | null
+  batchResults: BatchItemResult<EmbeddingGenerateResult>[]
 }
 
 export function useChunkEmbeddings(
@@ -43,6 +81,10 @@ export function useChunkEmbeddings(
   const [saveStatus, setSaveStatus] = useState<EmbeddingsSaveStatus>('idle')
   const [saveProgressPercent, setSaveProgressPercent] = useState(0)
   const [hasSavedOnce, setHasSavedOnce] = useState(false)
+  const [currentSelection, setCurrentSelection] = useState<string | null>(null)
+  const [currentModel, setCurrentModel] = useState<string | null>(null)
+  const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null)
+  const [batchResults, setBatchResults] = useState<BatchItemResult<EmbeddingGenerateResult>[]>([])
   const closeGenerateStreamRef = useRef<(() => void) | null>(null)
   const closeSaveStreamRef = useRef<(() => void) | null>(null)
 
@@ -88,7 +130,9 @@ export function useChunkEmbeddings(
   }, [])
 
   useEffect(() => {
-    if (documentId === null) {
+    // "Entire Corpus" has no single document's saved chunks to preview — treated the same
+    // as no selection for this effect (018-ui-polish-batch research.md §1).
+    if (documentId === null || isEntireCorpusSelection(documentId)) {
       setSavedChunks([])
       setIsLoadingSavedChunks(false)
       return
@@ -114,31 +158,81 @@ export function useChunkEmbeddings(
     }
   }, [documentId])
 
-  const generate = useCallback((documentId: string, model: string) => {
-    closeGenerateStreamRef.current?.()
-    setGenerateStatus('generating')
-    setProgressPercent(0)
-    setPreview(null)
+  const isEntireCorpus = documentId !== null && isEntireCorpusSelection(documentId)
 
-    closeGenerateStreamRef.current = generateEmbeddingsStream(documentId, model, {
-      onProgress: (percent) => setProgressPercent(percent),
-      onResult: (result) => {
-        setGenerateStatus('success')
-        setPreview(result)
-      },
-      onError: () => {
-        setGenerateStatus('error')
-        setPreview(null)
-      },
-    })
-  }, [])
+  const generate = useCallback(
+    (selection: string, model: string) => {
+      closeGenerateStreamRef.current?.()
+      setGenerateStatus('generating')
+      setProgressPercent(0)
+      setPreview(null)
+      setSaveStatus('idle')
+      setSaveProgressPercent(0)
+      setBatchResults([])
+      setBatchProgress(null)
+      setCurrentSelection(selection)
+      setCurrentModel(model)
 
-  // save() persists the most recently generated preview — its documentId/model, not a
-  // separately tracked "last generate call" (the preview itself is the source of truth
-  // for what to save). Independent of generateStatus/progressPercent, and entirely
-  // independent of the Chunking screen's own save state (no shared hook/state between
+      if (isEntireCorpusSelection(selection)) {
+        void runSequentialBatch(
+          documents,
+          (doc, reportDocumentProgress) =>
+            generateEmbeddingsStreamAsPromise(doc.id, model, reportDocumentProgress),
+          (progress) => setBatchProgress(progress),
+        ).then((results) => {
+          setBatchProgress(null)
+          setBatchResults(results)
+          setGenerateStatus(results.some((r) => r.status === 'success') ? 'success' : 'error')
+        })
+        return
+      }
+
+      closeGenerateStreamRef.current = generateEmbeddingsStream(selection, model, {
+        onProgress: (percent) => setProgressPercent(percent),
+        onResult: (result) => {
+          setGenerateStatus('success')
+          setPreview(result)
+        },
+        onError: () => {
+          setGenerateStatus('error')
+          setPreview(null)
+        },
+      })
+    },
+    [documents],
+  )
+
+  // save() persists whatever the last generate() call produced — for a single document, the
+  // preview's own documentId/model (the source of truth for what to save, independent of
+  // generateStatus/progressPercent); for "Entire Corpus", a sequential per-document save batch
+  // using that same selected model (018-ui-polish-batch contracts/entire-corpus-batch-orchestration.md).
+  // Entirely independent of the Chunking screen's own save state (no shared hook/state between
   // the two screens — spec FR-008).
   const save = useCallback(() => {
+    if (currentSelection !== null && isEntireCorpusSelection(currentSelection)) {
+      if (currentModel === null) {
+        return
+      }
+      setSaveStatus('saving')
+      setBatchProgress(null)
+      void runSequentialBatch(
+        documents,
+        (doc, reportDocumentProgress) =>
+          saveEmbeddingsStreamAsPromise(doc.id, currentModel, reportDocumentProgress),
+        (progress) => setBatchProgress(progress),
+      ).then((results) => {
+        setBatchProgress(null)
+        setBatchResults(results)
+        if (results.some((r) => r.status === 'success')) {
+          setSaveStatus('success')
+          setHasSavedOnce(true)
+        } else {
+          setSaveStatus('error')
+        }
+      })
+      return
+    }
+
     if (preview === null) {
       return
     }
@@ -151,16 +245,13 @@ export function useChunkEmbeddings(
       onProgress: (percent) => setSaveProgressPercent(percent),
       onResult: () => {
         setSaveStatus('success')
-        // hasSavedOnce is a one-way latch (research.md §5, mirrors 012's hasSavedOnce):
-        // set true only here, on a successful save, and never reset — even if a later
-        // generate or save fails.
         setHasSavedOnce(true)
       },
       onError: () => {
         setSaveStatus('error')
       },
     })
-  }, [preview])
+  }, [preview, currentSelection, currentModel, documents])
 
   return {
     documents,
@@ -176,5 +267,8 @@ export function useChunkEmbeddings(
     saveProgressPercent,
     save,
     hasSavedOnce,
+    isEntireCorpus,
+    batchProgress,
+    batchResults,
   }
 }

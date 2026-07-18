@@ -5,7 +5,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.chunking import service
-from app.chunking.schemas import ChunkRunResponse, ChunkSaveRequest, SavedChunk, SavedChunksResponse
+from app.chunking.schemas import SavedChunk, SavedChunksResponse
 from app.db.base import get_db
 from app.db.lookups import get_document_or_none
 
@@ -42,29 +42,30 @@ def run_chunking_stream(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-@router.post("/save")
-def save_chunking_result(
-    request: ChunkSaveRequest, db: Session = Depends(get_db)
-) -> ChunkRunResponse:
+@router.get("/save/stream")
+def save_chunking_stream(
+    documentId: str, chunkSize: int, overlap: int = 0, db: Session = Depends(get_db)
+) -> StreamingResponse:
     try:
         document = service.resolve_run(
-            db,
-            document_id=request.documentId,
-            chunk_size=request.chunkSize,
-            strategy=STRATEGY,
-            overlap=request.overlap,
+            db, document_id=documentId, chunk_size=chunkSize, strategy=STRATEGY, overlap=overlap
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    try:
-        return service.save_chunks(
-            db, document, request.chunkSize, STRATEGY, overlap=request.overlap
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to save chunks: {exc}") from exc
+    def event_stream():
+        try:
+            for event_type, payload in service.save_chunks_stream(
+                db, document, chunkSize, STRATEGY, overlap=overlap
+            ):
+                data = payload.model_dump_json() if event_type == "result" else json.dumps(payload)
+                yield f"event: {event_type}\ndata: {data}\n\n"
+        except Exception as exc:  # pragma: no cover - defensive, unexpected mid-stream failure
+            yield f"event: error\ndata: {json.dumps({'message': f'Failed to save chunks: {exc}'})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.get("/saved-chunks")

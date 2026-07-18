@@ -6,6 +6,7 @@ import { useChunkEmbeddings } from '../../src/hooks/useChunkEmbeddings'
 import type { UseChunkEmbeddings } from '../../src/hooks/useChunkEmbeddings'
 import type { SourceDocument } from '../../src/types/sourceDocument'
 import { CorpusProvider } from '../../src/context/CorpusContext'
+import { ENTIRE_CORPUS_SELECTION } from '../../src/lib/entireCorpusSelection'
 
 vi.mock('../../src/hooks/useChunkEmbeddings')
 
@@ -43,8 +44,12 @@ function mockState(overrides: Partial<UseChunkEmbeddings> = {}): UseChunkEmbeddi
     preview: null,
     generate: vi.fn(),
     saveStatus: 'idle',
+    saveProgressPercent: 0,
     save: vi.fn(),
     hasSavedOnce: false,
+    isEntireCorpus: false,
+    batchProgress: null,
+    batchResults: [],
     ...overrides,
   }
   mockedUseChunkEmbeddings.mockReturnValue(state)
@@ -327,5 +332,84 @@ describe('EmbeddingsScreen — auto-selected document loads saved chunks (015-fi
     await userEvent.selectOptions(screen.getByLabelText(/select document/i), 'b.pdf')
 
     expect(lastDocumentIdArg()).toBe('b.pdf')
+  })
+})
+
+describe('EmbeddingsScreen — Entire Corpus (018-ui-polish-batch US2)', () => {
+  it('renders an Entire Corpus option in the document selector', () => {
+    mockState()
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('option', { name: 'Entire Corpus' })).toBeInTheDocument()
+  })
+
+  it('does not disable Generate Embeddings for an empty savedChunks list while Entire Corpus is selected', () => {
+    mockState({ isEntireCorpus: true, savedChunks: [] })
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: /generate embeddings/i })).toBeEnabled()
+  })
+
+  it('calls generate with the Entire Corpus sentinel when selected and clicked', async () => {
+    const userEvent = (await import('@testing-library/user-event')).default
+    const state = mockState()
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} />)
+
+    await userEvent.selectOptions(screen.getByLabelText(/select document/i), 'Entire Corpus')
+    await userEvent.click(screen.getByRole('button', { name: /generate embeddings/i }))
+
+    expect(state.generate).toHaveBeenCalledWith(ENTIRE_CORPUS_SELECTION, 'bert')
+  })
+
+  it('shows combined progress while an Entire Corpus generate is in progress', () => {
+    mockState({
+      generateStatus: 'generating',
+      isEntireCorpus: true,
+      batchProgress: { index: 1, total: 3, documentId: 'doc-b', documentName: 'b.pdf', documentPercent: 0 },
+    })
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByText(/processing document 2 of 3 \(b\.pdf\)/i)).toBeInTheDocument()
+  })
+
+  it('shows a per-document summary after an Entire Corpus generate completes, including a failed/skipped document\'s error message', () => {
+    mockState({
+      generateStatus: 'success',
+      isEntireCorpus: true,
+      batchResults: [
+        {
+          documentId: 'doc-a',
+          documentName: 'a.pdf',
+          status: 'success',
+          result: { documentId: 'doc-a', model: 'bert', vectors: [{ chunkId: 'c1', model: 'bert', dims: 768, vector: [] }] },
+        },
+        {
+          documentId: 'doc-b',
+          documentName: 'b.pdf',
+          status: 'failed',
+          errorMessage: 'Failed to generate embeddings',
+        },
+      ],
+    })
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} />)
+
+    const summary = screen.getByTestId('entire-corpus-summary')
+    expect(within(summary).getByText('a.pdf')).toBeInTheDocument()
+    expect(within(summary).getByText(/1 embeddings generated/i)).toBeInTheDocument()
+    expect(within(summary).getByText('b.pdf')).toBeInTheDocument()
+    expect(within(summary).getByText(/failed to generate embeddings/i)).toBeInTheDocument()
+  })
+
+  it('enables Save once an Entire Corpus generate has succeeded', () => {
+    mockState({ generateStatus: 'success', isEntireCorpus: true, preview: null })
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeEnabled()
   })
 })

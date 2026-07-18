@@ -5,6 +5,7 @@ import { EmbeddingsScreen } from '../components/embeddings/EmbeddingsScreen'
 import { VectorViewScreen } from '../components/vector-view/VectorViewScreen'
 import { PlaygroundScreen } from '../components/playground/PlaygroundScreen'
 import { CorporaScreen } from '../components/corpora/CorporaScreen'
+import { MetricsScreen } from '../components/metrics/MetricsScreen'
 import type { ScreenId } from '../components/layout/SidebarNav'
 import { CorpusProvider } from '../context/CorpusContext'
 
@@ -23,6 +24,8 @@ function App() {
         <VectorViewScreen onNavigate={setActiveScreen} />
       ) : activeScreen === 'playground' ? (
         <PlaygroundScreen onNavigate={setActiveScreen} />
+      ) : activeScreen === 'metrics' ? (
+        <MetricsScreen onNavigate={setActiveScreen} />
       ) : (
         <DataSourcesScreen onNavigate={setActiveScreen} />
       )}

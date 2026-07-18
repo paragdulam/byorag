@@ -78,4 +78,34 @@ test.describe('Data Sources Screen', () => {
     await page.reload()
     await expect(page.getByText('valid.pdf')).toHaveCount(0)
   })
+
+  test('a long, unbroken-token document name wraps instead of forcing horizontal scrolling (018-ui-polish-batch US3)', async ({
+    page,
+  }) => {
+    await page.goto('/')
+
+    const corpusName = `Long Name Wrap Test ${Date.now()}`
+    const main = page.locator('main')
+    await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
+    await main.getByRole('button', { name: /new corpus/i }).click()
+    await main.getByLabel(/new corpus name/i).fill(corpusName)
+    await main.getByRole('button', { name: /^create$/i }).click()
+    await expect(main.getByTestId(/corpus-row-/).filter({ hasText: corpusName })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
+
+    const longName = 'a-very-long-unbroken-token-file-name-with-no-spaces-whatsoever-anywhere-in-it.pdf'
+    await page.setInputFiles('[data-testid="upload-browse-input"]', {
+      name: longName,
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4 long name test'),
+    })
+    await expect(page.getByText(longName)).toBeVisible()
+
+    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
+    const clientWidth = await page.evaluate(() => document.documentElement.clientWidth)
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+  })
 })

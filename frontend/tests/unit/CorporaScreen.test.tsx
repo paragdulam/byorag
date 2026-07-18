@@ -83,7 +83,7 @@ describe('CorporaScreen (009-corpora-screen US1)', () => {
     expect(main.getByTestId('corpus-row-new-id')).toHaveAttribute('aria-current', 'page')
   })
 
-  it('selecting a different corpus row makes it active', async () => {
+  it('clicking a non-active corpus row does not make it active (018-ui-polish-batch US5)', async () => {
     vi.stubGlobal(
       'fetch',
       stubCorporaFetch([
@@ -97,6 +97,27 @@ describe('CorporaScreen (009-corpora-screen US1)', () => {
     )
 
     await userEvent.click(main.getByTestId('corpus-row-b'))
+
+    expect(main.getByTestId('corpus-row-a')).toHaveAttribute('aria-current', 'page')
+    expect(main.getByTestId('corpus-row-b')).not.toHaveAttribute('aria-current')
+  })
+
+  it('clicking a non-active row\'s "Make Active" button does make it active (018-ui-polish-batch US5)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      stubCorporaFetch([
+        { id: 'a', name: 'Corpus A', createdAt: '2026-07-14T10:00:00Z' },
+        { id: 'b', name: 'Corpus B', createdAt: '2026-07-14T10:05:00Z' },
+      ]),
+    )
+    const main = renderScreen()
+    await waitFor(() =>
+      expect(main.getByTestId('corpus-row-a')).toHaveAttribute('aria-current', 'page'),
+    )
+
+    await userEvent.click(
+      within(main.getByTestId('corpus-row-b')).getByRole('button', { name: /make corpus b active/i }),
+    )
 
     expect(main.getByTestId('corpus-row-b')).toHaveAttribute('aria-current', 'page')
     expect(main.getByTestId('corpus-row-a')).not.toHaveAttribute('aria-current')
@@ -172,7 +193,9 @@ describe('CorporaScreen document management (009-corpora-screen US3)', () => {
     await waitFor(() => expect(main.getByTestId('corpus-row-corpus-a')).toBeInTheDocument())
     await userEvent.click(main.getByTestId('corpus-row-corpus-a'))
 
-    await waitFor(() => expect(main.getByText('already-in-a.pdf')).toBeInTheDocument())
+    await waitFor(() =>
+      expect(within(main.getByTestId('corpus-documents-list')).getByText('already-in-a.pdf')).toBeInTheDocument(),
+    )
   })
 
   it('the "add existing document" picker excludes documents already in the selected corpus', async () => {
@@ -181,7 +204,9 @@ describe('CorporaScreen document management (009-corpora-screen US3)', () => {
 
     await waitFor(() => expect(main.getByTestId('corpus-row-corpus-a')).toBeInTheDocument())
     await userEvent.click(main.getByTestId('corpus-row-corpus-a'))
-    await waitFor(() => expect(main.getByText('already-in-a.pdf')).toBeInTheDocument())
+    await waitFor(() =>
+      expect(within(main.getByTestId('corpus-documents-list')).getByText('already-in-a.pdf')).toBeInTheDocument(),
+    )
 
     const picker = (await main.findByLabelText(/add existing document/i)) as HTMLSelectElement
     expect(picker).toHaveTextContent('in-b-only.pdf')
@@ -262,11 +287,18 @@ describe('CorporaScreen document management (009-corpora-screen US3)', () => {
 
     await waitFor(() => expect(main.getByTestId('corpus-row-corpus-a')).toBeInTheDocument())
     await userEvent.click(main.getByTestId('corpus-row-corpus-a'))
-    await waitFor(() => expect(main.getByText('already-in-a.pdf')).toBeInTheDocument())
+    await waitFor(() =>
+      expect(within(main.getByTestId('corpus-documents-list')).getByText('already-in-a.pdf')).toBeInTheDocument(),
+    )
 
     await userEvent.click(main.getByRole('button', { name: /remove already-in-a\.pdf/i }))
 
-    await waitFor(() => expect(main.queryByText('already-in-a.pdf')).not.toBeInTheDocument())
+    await waitFor(() => expect(main.queryByTestId('corpus-documents-list')).not.toBeInTheDocument())
+    await waitFor(() =>
+      expect(main.getByTestId('corpus-row-corpus-a-documents')).toHaveTextContent(
+        /no documents in this corpus yet/i,
+      ),
+    )
     expect(removed).toBe(true)
   })
 })
@@ -411,5 +443,80 @@ describe('CorporaScreen: Make Active per row (011-move-corpus-row-actions US1)',
     expect(
       within(main.getByTestId('corpus-row-a')).queryByRole('button', { name: /make corpus a active/i }),
     ).not.toBeInTheDocument()
+  })
+})
+
+describe('CorporaScreen: per-row document preview (018-ui-polish-batch US7)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function docsFor(corpusId: string, count: number) {
+    return Array.from({ length: count }, (_, i) => ({
+      id: `${corpusId}-doc-${i}`,
+      name: `${corpusId}-doc-${i}.pdf`,
+      sizeBytes: 10,
+      uploadedAt: '2026-07-14T01:00:00Z',
+      status: 'processed',
+      corpusIds: [corpusId],
+    }))
+  }
+
+  function stubFetchWithAllDocuments(allDocuments: unknown[]) {
+    return vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const href = url.toString()
+      if (init?.method === 'DELETE') {
+        return jsonResponse(null, 204)
+      }
+      if (href.endsWith('/api/corpora')) {
+        return jsonResponse({
+          corpora: [
+            { id: 'a', name: 'Corpus A', createdAt: '2026-07-14T10:00:00Z' },
+            { id: 'b', name: 'Corpus B', createdAt: '2026-07-14T10:05:00Z' },
+          ],
+        })
+      }
+      if (href.includes('/api/sources/all')) {
+        return jsonResponse({ documents: allDocuments })
+      }
+      return jsonResponse({ documents: [] })
+    })
+  }
+
+  it('shows exactly 5 documents plus a "Show more" control for a corpus with more than 5', async () => {
+    vi.stubGlobal('fetch', stubFetchWithAllDocuments(docsFor('a', 7)))
+    const main = renderScreen()
+
+    const preview = await waitFor(() => main.getByTestId('corpus-row-a-documents'))
+    expect(within(preview).getAllByRole('listitem')).toHaveLength(5)
+    expect(within(preview).getByRole('button', { name: /show more/i })).toBeInTheDocument()
+  })
+
+  it('reveals the rest when "Show more" is clicked, and becomes "Show less"', async () => {
+    vi.stubGlobal('fetch', stubFetchWithAllDocuments(docsFor('a', 7)))
+    const main = renderScreen()
+
+    const preview = await waitFor(() => main.getByTestId('corpus-row-a-documents'))
+    await userEvent.click(within(preview).getByRole('button', { name: /show more/i }))
+
+    expect(within(preview).getAllByRole('listitem')).toHaveLength(7)
+    expect(within(preview).getByRole('button', { name: /show less/i })).toBeInTheDocument()
+  })
+
+  it('shows all documents with no "Show more" control for a corpus with 5 or fewer', async () => {
+    vi.stubGlobal('fetch', stubFetchWithAllDocuments(docsFor('a', 3)))
+    const main = renderScreen()
+
+    const preview = await waitFor(() => main.getByTestId('corpus-row-a-documents'))
+    expect(within(preview).getAllByRole('listitem')).toHaveLength(3)
+    expect(within(preview).queryByRole('button', { name: /show more/i })).not.toBeInTheDocument()
+  })
+
+  it('shows an empty-state message for a corpus with zero documents', async () => {
+    vi.stubGlobal('fetch', stubFetchWithAllDocuments([]))
+    const main = renderScreen()
+
+    const preview = await waitFor(() => main.getByTestId('corpus-row-a-documents'))
+    expect(preview).toHaveTextContent(/no documents in this corpus yet/i)
   })
 })

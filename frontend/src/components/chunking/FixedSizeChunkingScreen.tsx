@@ -3,6 +3,8 @@ import { AppShell } from '../layout/AppShell'
 import type { ScreenId } from '../layout/SidebarNav'
 import { useFixedSizeChunking } from '../../hooks/useFixedSizeChunking'
 import { useCorpus } from '../../context/CorpusContext'
+import { ENTIRE_CORPUS_SELECTION } from '../../lib/entireCorpusSelection'
+import { computeCombinedPercent, formatBatchProgressLabel } from '../../lib/batchRunner'
 
 export interface FixedSizeChunkingScreenProps {
   onNavigate: (screen: ScreenId) => void
@@ -12,8 +14,21 @@ const SEPARATOR_OPTIONS = ['"\\n\\n"', '"\\n"', '" "', '""']
 
 export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenProps) {
   const { activeCorpusId } = useCorpus()
-  const { documents, status, progressPercent, result, saveStatus, hasSavedOnce, isSaved, run, save } =
-    useFixedSizeChunking(activeCorpusId)
+  const {
+    documents,
+    status,
+    progressPercent,
+    result,
+    saveStatus,
+    saveProgressPercent,
+    hasSavedOnce,
+    isSaved,
+    isEntireCorpus,
+    batchProgress,
+    batchResults,
+    run,
+    save,
+  } = useFixedSizeChunking(activeCorpusId)
 
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>('')
   const [chunkSizeInput, setChunkSizeInput] = useState('512')
@@ -71,6 +86,7 @@ export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenP
                   onChange={(event) => setSelectedDocumentId(event.target.value)}
                   className="mt-1 rounded border border-outline-variant bg-surface p-2 text-on-surface"
                 >
+                  <option value={ENTIRE_CORPUS_SELECTION}>Entire Corpus</option>
                   {documents.map((doc) => (
                     <option key={doc.id} value={doc.id}>
                       {doc.name}
@@ -154,21 +170,43 @@ export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenP
 
             {status === 'running' && (
               <div className="mt-4 shrink-0">
-                <div
-                  role="progressbar"
-                  aria-valuenow={progressPercent}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  className="h-2 w-full overflow-hidden rounded bg-surface-container"
-                >
-                  <div
-                    className="h-full bg-primary-container transition-[width]"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
-                <p className="mt-1 text-xs text-on-surface-variant">
-                  Chunking… {progressPercent}%
-                </p>
+                {isEntireCorpus && batchProgress ? (
+                  <>
+                    <div
+                      role="progressbar"
+                      aria-valuenow={computeCombinedPercent(batchProgress)}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      className="h-2 w-full overflow-hidden rounded bg-surface-container"
+                    >
+                      <div
+                        className="h-full bg-primary-container transition-[width]"
+                        style={{ width: `${computeCombinedPercent(batchProgress)}%` }}
+                      />
+                    </div>
+                    <p className="mt-1 text-xs text-on-surface-variant">
+                      {formatBatchProgressLabel(batchProgress)}… {computeCombinedPercent(batchProgress)}%
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div
+                      role="progressbar"
+                      aria-valuenow={progressPercent}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      className="h-2 w-full overflow-hidden rounded bg-surface-container"
+                    >
+                      <div
+                        className="h-full bg-primary-container transition-[width]"
+                        style={{ width: `${progressPercent}%` }}
+                      />
+                    </div>
+                    <p className="mt-1 text-xs text-on-surface-variant">
+                      Chunking… {progressPercent}%
+                    </p>
+                  </>
+                )}
               </div>
             )}
 
@@ -176,39 +214,105 @@ export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenP
               data-testid="chunk-list"
               className="mt-4 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto"
             >
-              {status === 'extraction-failed' && (
-                <p role="alert" className="text-error">
-                  Text could not be extracted from this document.
-                </p>
-              )}
-
-              {status === 'error' && (
-                <p role="alert" className="text-error">
-                  Something went wrong while chunking this document. Please try again.
-                </p>
-              )}
-
-              {status === 'success' && result && (
-                <>
-                  {result.chunks.map((chunk) => (
-                    <div
-                      key={chunk.index}
-                      className="rounded-lg border border-outline-variant bg-surface-container p-4"
+              {isEntireCorpus && batchResults.length > 0 ? (
+                <ul data-testid="entire-corpus-summary" className="flex flex-col gap-2">
+                  {batchResults.map((item) => (
+                    <li
+                      key={item.documentId}
+                      className="flex items-center justify-between rounded-lg border border-outline-variant bg-surface-container p-4"
                     >
-                      <div className="font-mono text-xs text-tertiary">CHUNK_{chunk.index}</div>
-                      <p className="mt-2 text-on-surface">{chunk.content}</p>
-                    </div>
+                      <span className="text-on-surface">{item.documentName}</span>
+                      {item.status === 'success' ? (
+                        <span className="text-sm text-on-surface-variant">
+                          {item.result?.result?.totalChunks ?? 0} chunks
+                        </span>
+                      ) : (
+                        <span role="alert" className="text-sm text-error">
+                          {item.errorMessage ?? 'Failed'}
+                        </span>
+                      )}
+                    </li>
                   ))}
-
-                  {result.totalChunks > result.chunks.length && (
-                    <p className="text-sm text-on-surface-variant">
-                      More chunks exist beyond the {result.chunks.length} shown here (
-                      {result.totalChunks} total).
+                </ul>
+              ) : (
+                <>
+                  {status === 'extraction-failed' && (
+                    <p role="alert" className="text-error">
+                      Text could not be extracted from this document.
                     </p>
+                  )}
+
+                  {status === 'error' && !isEntireCorpus && (
+                    <p role="alert" className="text-error">
+                      Something went wrong while chunking this document. Please try again.
+                    </p>
+                  )}
+
+                  {status === 'success' && result && (
+                    <>
+                      {result.chunks.map((chunk) => (
+                        <div
+                          key={chunk.index}
+                          className="rounded-lg border border-outline-variant bg-surface-container p-4"
+                        >
+                          <div className="font-mono text-xs text-tertiary">CHUNK_{chunk.index}</div>
+                          <p className="mt-2 text-on-surface">{chunk.content}</p>
+                        </div>
+                      ))}
+
+                      {result.totalChunks > result.chunks.length && (
+                        <p className="text-sm text-on-surface-variant">
+                          More chunks exist beyond the {result.chunks.length} shown here (
+                          {result.totalChunks} total).
+                        </p>
+                      )}
+                    </>
                   )}
                 </>
               )}
             </div>
+
+            {saveStatus === 'saving' && (
+              <div data-testid="save-progress" className="mt-4 shrink-0">
+                {isEntireCorpus && batchProgress ? (
+                  <>
+                    <div
+                      role="progressbar"
+                      aria-valuenow={computeCombinedPercent(batchProgress)}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      className="h-2 w-full overflow-hidden rounded bg-surface-container"
+                    >
+                      <div
+                        className="h-full bg-primary-container transition-[width]"
+                        style={{ width: `${computeCombinedPercent(batchProgress)}%` }}
+                      />
+                    </div>
+                    <p className="mt-1 text-xs text-on-surface-variant">
+                      Saving… {formatBatchProgressLabel(batchProgress)}… {computeCombinedPercent(batchProgress)}%
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div
+                      role="progressbar"
+                      aria-valuenow={saveProgressPercent}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      className="h-2 w-full overflow-hidden rounded bg-surface-container"
+                    >
+                      <div
+                        className="h-full bg-primary-container transition-[width]"
+                        style={{ width: `${saveProgressPercent}%` }}
+                      />
+                    </div>
+                    <p className="mt-1 text-xs text-on-surface-variant">
+                      Saving chunks… {saveProgressPercent}%
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
 
             {saveStatus === 'error' && (
               <p role="alert" className="mt-2 shrink-0 text-sm text-error">
@@ -217,7 +321,7 @@ export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenP
             )}
 
             <div className="mt-4 flex shrink-0 items-center justify-end gap-3 border-t border-outline-variant pt-4">
-              {status === 'success' && (
+              {status === 'success' && !isEntireCorpus && (
                 <span
                   data-testid="save-status-indicator"
                   className="text-sm text-on-surface-variant"

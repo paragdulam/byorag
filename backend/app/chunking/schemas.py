@@ -23,12 +23,6 @@ class ChunkRunResponse(BaseModel):
     result: ChunkingResult | None = None
 
 
-class ChunkSaveRequest(BaseModel):
-    documentId: str
-    chunkSize: int
-    overlap: int = 0
-
-
 class SavedChunk(BaseModel):
     id: str
     index: int

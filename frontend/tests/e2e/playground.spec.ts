@@ -282,4 +282,94 @@ test.describe('Playground Split-Screen Chat Interface', () => {
     await expect(page.getByText(firstQuestion)).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(secondQuestion)).toBeVisible()
   })
+
+  test('a Markdown-formatted answer renders with real formatting, not literal syntax (018-ui-polish-batch US6)', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000)
+    const runId = Date.now()
+
+    // Stub Generate to deterministically return a Markdown-formatted answer — this
+    // environment has no configured LLM provider key, so a real Generate call always fails
+    // (see the "revisit" test above for the same reasoning).
+    const turnsById = new Map<string, Record<string, unknown>>()
+    await page.route('**/api/playground/turns', async (route) => {
+      if (route.request().method() !== 'POST') {
+        await route.continue()
+        return
+      }
+      const response = await route.fetch()
+      const body = (await response.json()) as { id: string }
+      turnsById.set(body.id, body)
+      await route.fulfill({ response, json: body })
+    })
+    await page.route('**/api/playground/turns/*/generate', async (route) => {
+      const turnId = new URL(route.request().url()).pathname.split('/').slice(-2, -1)[0]
+      const original = turnsById.get(turnId)
+      const answered = {
+        ...original,
+        llmProvider: 'test-provider',
+        llmModel: 'test-model',
+        prompt: 'test prompt',
+        answer: 'Here is a summary:\n\n- **Key** point one\n- Key point two',
+        error: null,
+        answeredAt: new Date().toISOString(),
+      }
+      turnsById.set(turnId, answered)
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(answered) })
+    })
+
+    await page.goto('/')
+
+    const corpusName = `Playground Markdown E2E Fixture Corpus ${runId}`
+    const main = page.locator('main')
+    await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
+    await main.getByRole('button', { name: /new corpus/i }).click()
+    await main.getByLabel(/new corpus name/i).fill(corpusName)
+    await main.getByRole('button', { name: /^create$/i }).click()
+    await expect(main.getByTestId(/corpus-row-/).filter({ hasText: corpusName })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
+
+    const playgroundPdf = path.join(FIXTURES_DIR, 'playground-sample.pdf')
+    await page.setInputFiles('[data-testid="upload-browse-input"]', playgroundPdf)
+    await expect(page.getByText('playground-sample.pdf').first()).toBeVisible()
+    await expect(page.getByText('PROCESSED').first()).toBeVisible({ timeout: 3000 })
+
+    await page.getByRole('link', { name: 'CHUNKING', exact: true }).click()
+    await page.getByRole('link', { name: 'FIXED SIZE CHUNKING', exact: true }).click()
+    await page.getByLabel('Select document').selectOption({ label: 'playground-sample.pdf' })
+    await page.getByLabel('Chunk size').fill('10')
+    await page.getByLabel(/^overlap$/i).fill('0')
+    await page.getByRole('button', { name: 'Re-Calculate Chunks' }).click()
+    await expect(page.getByRole('progressbar')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Save Chunks' }).click()
+    await expect(page.getByTestId('save-status-indicator')).toHaveText(/^saved$/i)
+
+    await page.getByRole('link', { name: 'EMBEDDINGS', exact: true }).click()
+    await expect(page.getByText('CHUNK_0')).toBeVisible()
+    await page.getByRole('button', { name: 'Generate Embeddings' }).click()
+    await expect(page.getByText(/embeddings generated/i)).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('button', { name: 'Save' }).click()
+    await expect(page.getByRole('progressbar')).toHaveCount(0, { timeout: 30_000 })
+    await expect(page.getByRole('button', { name: 'Move to Vector View' })).toBeEnabled()
+
+    await page.getByRole('button', { name: 'Move to Vector View' }).click()
+    await page.getByRole('button', { name: 'Move to Playground' }).click()
+    await expect(page.getByRole('heading', { name: 'Playground' })).toBeVisible()
+
+    const question = `Markdown question? (${runId})`
+    await page.getByRole('textbox', { name: 'Question' }).fill(question)
+    await page.getByRole('button', { name: 'Send' }).click()
+    await expect(page.getByRole('button', { name: 'Generate' })).toBeEnabled({ timeout: 15_000 })
+    await page.getByRole('button', { name: 'Generate' }).click()
+
+    const answerBubble = page.getByRole('button', { name: `Answer to ${question}` })
+    await expect(answerBubble).toBeVisible({ timeout: 15_000 })
+    await expect(answerBubble.locator('li')).toHaveCount(2)
+    await expect(answerBubble.locator('strong', { hasText: 'Key' }).first()).toBeVisible()
+    await expect(answerBubble).not.toContainText('**Key**')
+  })
 })
