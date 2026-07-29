@@ -15,6 +15,8 @@ from app.embeddings.schemas import (
     ListProjectionMethodsResponse,
     ListSavedEmbeddingsResponse,
     ProjectionMethodOption,
+    ProjectionRequest,
+    ProjectionResponse,
     SavedEmbeddingOut,
 )
 from app.db.base import get_db
@@ -63,6 +65,21 @@ def list_projection_methods() -> ListProjectionMethodsResponse:
             for key, info in PROJECTION_METHODS.items()
         ]
     )
+
+
+@router.post("/project")
+def project_embeddings(request: ProjectionRequest) -> ProjectionResponse:
+    try:
+        points = service.compute_projection(request.method, request.entries)
+    except service.UnknownProjectionMethodError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (
+        service.InsufficientProjectionEntriesError,
+        service.MismatchedProjectionDimensionsError,
+    ) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return ProjectionResponse(points=points)
 
 
 @router.get("/saved")

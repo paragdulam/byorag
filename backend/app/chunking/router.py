@@ -5,7 +5,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.chunking import service
-from app.chunking.schemas import SavedChunk, SavedChunksResponse
+from app.chunking.schemas import SavedChunk, SavedChunksResponse, StructuredPreviewResponse
 from app.db.base import get_db
 from app.db.lookups import get_document_or_none
 
@@ -76,4 +76,24 @@ def get_saved_chunks(documentId: str, db: Session = Depends(get_db)) -> SavedChu
     chunks = service.list_saved_chunks(db, documentId)
     return SavedChunksResponse(
         chunks=[SavedChunk(id=c.id, index=c.index, content=c.content) for c in chunks]
+    )
+
+
+@router.get("/structured-preview")
+def get_structured_preview(
+    documentId: str, db: Session = Depends(get_db)
+) -> StructuredPreviewResponse:
+    document = get_document_or_none(db, documentId)
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"No document found with id {documentId!r}")
+
+    try:
+        full_text, segments, pages, chunk_ranges = service.compute_structured_preview(db, document)
+    except service.NoSavedChunksError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except service.DocumentFileUnavailableError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return StructuredPreviewResponse(
+        fullText=full_text, segments=segments, pages=pages, chunkRanges=chunk_ranges
     )

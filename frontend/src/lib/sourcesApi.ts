@@ -55,6 +55,15 @@ export async function listSources(corpusId: string): Promise<SourceDocument[]> {
   return body.documents.map(toSourceDocument)
 }
 
+/**
+ * URL for a document's stored PDF bytes (contracts/sources-file-api.md,
+ * 021-sources-chunking-embeddings-refresh). Returned as a plain URL rather than a fetched
+ * blob — the PDF viewer (`react-pdf`/`pdfjs`) fetches and parses it directly.
+ */
+export function sourceFileUrl(documentId: string): string {
+  return `${SOURCES_ENDPOINT}/${encodeURIComponent(documentId)}/file`
+}
+
 export async function listAllSources(): Promise<DocumentWithCorpora[]> {
   const response = await fetch(ALL_SOURCES_ENDPOINT)
   if (!response.ok) {

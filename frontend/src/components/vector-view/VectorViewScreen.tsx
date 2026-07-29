@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AppShell } from '../layout/AppShell'
 import type { ScreenId } from '../layout/SidebarNav'
 import { useVectorView } from '../../hooks/useVectorView'
+import { useEmbeddingProjection, MIN_PROJECTION_ENTRIES } from '../../hooks/useEmbeddingProjection'
+import type { ProjectionDocumentGroup } from '../../hooks/useEmbeddingProjection'
+import { EmbeddingProjectionView } from '../embeddings/EmbeddingProjectionView'
 import { useCorpus } from '../../context/CorpusContext'
 import { ENTIRE_CORPUS_SELECTION, isEntireCorpusSelection } from '../../lib/entireCorpusSelection'
 
@@ -52,6 +55,23 @@ export function VectorViewScreen({ onNavigate }: VectorViewScreenProps) {
     projectionMethods.find((m) => m.id === selectedProjectionMethodId) ??
     projectionMethods.find((m) => m.available) ??
     projectionMethods[0]
+
+  // Groups feeding the UMAP/PCA projection (021-sources-chunking-embeddings-refresh US4): every
+  // document's chunks in "Entire Corpus" scope, or just the selected document's otherwise —
+  // independent of which single chunk happens to be selected in the left-side list.
+  const projectionGroups = useMemo<ProjectionDocumentGroup[]>(() => {
+    if (isEntireCorpus) {
+      return chunkGroups
+    }
+    if (activeDocumentId === '') {
+      return []
+    }
+    const doc = documents.find((d) => d.id === activeDocumentId)
+    return [{ documentId: activeDocumentId, documentName: doc?.name ?? activeDocumentId, chunks: savedChunks }]
+  }, [isEntireCorpus, chunkGroups, activeDocumentId, documents, savedChunks])
+
+  const projection = useEmbeddingProjection(projectionGroups, activeProjectionMethod?.id ?? '')
+  const isProjectionMethod = activeProjectionMethod?.id === 'umap' || activeProjectionMethod?.id === 'pca'
 
   const selectChunk = (chunkId: string) => {
     setSelectedChunkId(chunkId)
@@ -177,12 +197,20 @@ export function VectorViewScreen({ onNavigate }: VectorViewScreenProps) {
                     onChange={(event) => setSelectedProjectionMethodId(event.target.value)}
                     className="mt-1 rounded border border-outline-variant bg-surface p-2 text-on-surface"
                   >
-                    {projectionMethods.map((method) => (
-                      <option key={method.id} value={method.id}>
-                        {method.label}
-                        {method.available ? '' : ' (coming soon)'}
-                      </option>
-                    ))}
+                    {projectionMethods.map((method) => {
+                      const needsMinimum = method.id === 'umap' || method.id === 'pca'
+                      const belowMinimum =
+                        needsMinimum &&
+                        !projection.isResolvingEntries &&
+                        projection.entryCount < MIN_PROJECTION_ENTRIES
+                      return (
+                        <option key={method.id} value={method.id} disabled={!method.available || belowMinimum}>
+                          {method.label}
+                          {!method.available ? ' (coming soon)' : ''}
+                          {method.available && belowMinimum ? ` (needs ${MIN_PROJECTION_ENTRIES}+ embedded chunks)` : ''}
+                        </option>
+                      )
+                    })}
                   </select>
                 </div>
 
@@ -212,6 +240,34 @@ export function VectorViewScreen({ onNavigate }: VectorViewScreenProps) {
                     <p className="text-on-surface-variant">
                       {activeProjectionMethod.label} is not available yet.
                     </p>
+                  ) : isProjectionMethod ? (
+                    projection.isResolvingEntries ? (
+                      <p className="text-on-surface-variant">Resolving embedded chunks…</p>
+                    ) : projection.entryCount < MIN_PROJECTION_ENTRIES ? (
+                      <p data-testid="projection-minimum-message" className="text-on-surface-variant">
+                        At least {MIN_PROJECTION_ENTRIES} embedded chunks are required to compute a
+                        projection ({projection.entryCount} available).
+                      </p>
+                    ) : projection.isComputing ? (
+                      <p className="text-on-surface-variant">Computing projection…</p>
+                    ) : projection.error ? (
+                      <p role="alert" className="text-error">
+                        {projection.error}
+                      </p>
+                    ) : projection.points ? (
+                      <>
+                        <EmbeddingProjectionView points={projection.points} groupByDocument={isEntireCorpus} />
+                        {projection.excludedDocuments.length > 0 && (
+                          <p
+                            data-testid="projection-excluded-documents"
+                            className="mt-2 text-xs text-on-surface-variant"
+                          >
+                            Excluded (no saved embeddings):{' '}
+                            {projection.excludedDocuments.map((d) => d.documentName).join(', ')}
+                          </p>
+                        )}
+                      </>
+                    ) : null
                   ) : activeEmbedding ? (
                     <div
                       data-testid="vector-grid"

@@ -11,6 +11,22 @@ import { ENTIRE_CORPUS_SELECTION } from '../../src/lib/entireCorpusSelection'
 
 vi.mock('../../src/hooks/useFixedSizeChunking')
 
+vi.mock('../../src/components/chunking/ChunkInContextPreview', () => ({
+  ChunkInContextPreview: ({
+    documentId,
+    selectedChunkIndex,
+    hasUnsavedChanges,
+  }: {
+    documentId: string
+    selectedChunkIndex: number
+    hasUnsavedChanges: boolean
+  }) => (
+    <div data-testid="mock-chunk-context-preview">
+      {documentId} / {selectedChunkIndex} / {hasUnsavedChanges ? 'unsaved' : 'saved'}
+    </div>
+  ),
+}))
+
 // Every call site below renders <FixedSizeChunkingScreen /> via this local
 // `render`, which wraps in CorpusProvider — required because AppShell ->
 // SidebarNav reads the active corpus from context (008-corpora-management).
@@ -35,9 +51,11 @@ function mockState(overrides: Partial<UseFixedSizeChunking> = {}): UseFixedSizeC
   const state: UseFixedSizeChunking = {
     documents: [makeDoc()],
     isLoadingDocuments: false,
+    activeDocumentId: 'report.pdf',
     status: 'idle',
     progressPercent: 0,
     result: null,
+    chunkOrigin: null,
     saveStatus: 'idle',
     saveProgressPercent: 0,
     hasSavedOnce: false,
@@ -49,7 +67,13 @@ function mockState(overrides: Partial<UseFixedSizeChunking> = {}): UseFixedSizeC
     save: vi.fn(),
     ...overrides,
   }
-  mockedUseFixedSizeChunking.mockReturnValue(state)
+  // Reactive rather than a static mockReturnValue: activeDocumentId reflects whatever
+  // selectedDocumentId the screen currently passes in (mirroring the real hook), unless a test
+  // explicitly overrides activeDocumentId to pin a specific scenario.
+  mockedUseFixedSizeChunking.mockImplementation((_corpusId, selectedDocumentId = '') => ({
+    ...state,
+    activeDocumentId: overrides.activeDocumentId ?? (selectedDocumentId || state.documents[0]?.id || ''),
+  }))
   return state
 }
 
@@ -563,5 +587,185 @@ describe('FixedSizeChunkingScreen — Save Chunks progress (018-ui-polish-batch 
     render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
 
     expect(screen.getByRole('button', { name: /save chunks/i })).toBeDisabled()
+  })
+})
+
+describe('FixedSizeChunkingScreen — auto-loaded chunk indicator (021-sources-chunking-embeddings-refresh)', () => {
+  it('shows an "already chunked" indicator when the displayed result was auto-loaded', () => {
+    mockState({
+      status: 'success',
+      chunkOrigin: 'auto-loaded',
+      result: {
+        chunks: [{ index: 0, content: 'saved chunk' }],
+        totalChunks: 1,
+        strategy: 'fixed-size',
+        chunkSize: 0,
+        overlap: 0,
+      },
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByTestId('already-done-indicator')).toBeInTheDocument()
+  })
+
+  it('does not show the "already chunked" indicator for a freshly computed result', () => {
+    mockState({
+      status: 'success',
+      chunkOrigin: 'computed',
+      result: {
+        chunks: [{ index: 0, content: 'fresh chunk' }],
+        totalChunks: 1,
+        strategy: 'fixed-size',
+        chunkSize: 50,
+        overlap: 0,
+      },
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.queryByTestId('already-done-indicator')).not.toBeInTheDocument()
+  })
+
+  it('does not show the indicator while nothing has been loaded or computed yet', () => {
+    mockState({ status: 'idle', chunkOrigin: null, result: null })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.queryByTestId('already-done-indicator')).not.toBeInTheDocument()
+  })
+
+  it('shows the "already chunked" indicator for an auto-loaded Entire Corpus summary', () => {
+    mockState({
+      status: 'success',
+      isEntireCorpus: true,
+      activeDocumentId: ENTIRE_CORPUS_SELECTION,
+      chunkOrigin: 'auto-loaded',
+      batchResults: [
+        {
+          documentId: 'doc-a',
+          documentName: 'a.pdf',
+          status: 'success',
+          result: {
+            extractionFailed: false,
+            result: { chunks: [], totalChunks: 3, strategy: 'fixed-size', chunkSize: 0, overlap: 0 },
+          },
+        },
+      ],
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByTestId('already-done-indicator')).toBeInTheDocument()
+  })
+
+  it('calling Re-Calculate Chunks is unaffected by chunkOrigin and still calls run()', async () => {
+    const state = mockState({
+      status: 'success',
+      chunkOrigin: 'auto-loaded',
+      result: { chunks: [{ index: 0, content: 'x' }], totalChunks: 1, strategy: 'fixed-size', chunkSize: 0, overlap: 0 },
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    await userEvent.click(screen.getByRole('button', { name: /re-calculate chunks/i }))
+
+    expect(state.run).toHaveBeenCalledWith('report.pdf', 512, 50)
+  })
+})
+
+describe('FixedSizeChunkingScreen — in-context chunk preview (023-pdf-fullscreen-chunk-view US2)', () => {
+  function successState(overrides: Partial<UseFixedSizeChunking> = {}) {
+    return mockState({
+      status: 'success',
+      result: {
+        chunks: [
+          { index: 0, content: 'first chunk text' },
+          { index: 1, content: 'second chunk text' },
+        ],
+        totalChunks: 2,
+        strategy: 'fixed-size',
+        chunkSize: 50,
+        overlap: 0,
+      },
+      ...overrides,
+    })
+  }
+
+  it('renders a chunk-context-preview pane alongside the chunk list, defaulting to the first chunk', () => {
+    successState()
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    const preview = screen.getByTestId('mock-chunk-context-preview')
+    expect(preview).toHaveTextContent('report.pdf / 0 / saved')
+  })
+
+  it('updates the in-context preview to the clicked chunk', async () => {
+    successState()
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    await userEvent.click(screen.getByText(/CHUNK_1/))
+
+    expect(screen.getByTestId('mock-chunk-context-preview')).toHaveTextContent(
+      'report.pdf / 1 / saved',
+    )
+  })
+
+  it('visually marks the selected chunk card', async () => {
+    successState()
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    const firstCard = screen.getByText(/CHUNK_0/).closest('button')
+    const secondCard = screen.getByText(/CHUNK_1/).closest('button')
+    expect(firstCard).toHaveAttribute('aria-current', 'true')
+    expect(secondCard).not.toHaveAttribute('aria-current', 'true')
+
+    await userEvent.click(screen.getByText(/CHUNK_1/))
+
+    expect(screen.getByText(/CHUNK_0/).closest('button')).not.toHaveAttribute('aria-current', 'true')
+    expect(screen.getByText(/CHUNK_1/).closest('button')).toHaveAttribute('aria-current', 'true')
+  })
+
+  it('passes hasUnsavedChanges=true to the in-context preview for a fresh, unsaved computed result', () => {
+    successState({ chunkOrigin: 'computed', isSaved: false })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByTestId('mock-chunk-context-preview')).toHaveTextContent('unsaved')
+  })
+
+  it('passes hasUnsavedChanges=false to the in-context preview for an auto-loaded result', () => {
+    successState({ chunkOrigin: 'auto-loaded', isSaved: true })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByTestId('mock-chunk-context-preview')).toHaveTextContent('saved')
+  })
+
+  it('does not render the in-context preview in Entire Corpus scope', () => {
+    mockState({
+      status: 'success',
+      isEntireCorpus: true,
+      activeDocumentId: ENTIRE_CORPUS_SELECTION,
+      batchResults: [
+        {
+          documentId: 'doc-a',
+          documentName: 'a.pdf',
+          status: 'success',
+          result: {
+            extractionFailed: false,
+            result: { chunks: [], totalChunks: 3, strategy: 'fixed-size', chunkSize: 0, overlap: 0 },
+          },
+        },
+      ],
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+
+    expect(screen.queryByTestId('mock-chunk-context-preview')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('chunk-context-preview')).not.toBeInTheDocument()
   })
 })

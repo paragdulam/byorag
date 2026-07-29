@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.db.base import get_db
@@ -53,6 +54,21 @@ async def upload_sources(
             documents.append(result)
 
     return UploadSourcesResponse(documents=documents, rejections=rejections)
+
+
+@router.get("/{document_id}/file")
+def get_source_file(document_id: str, db: Session = Depends(get_db)) -> FileResponse:
+    try:
+        path = service.get_document_file_path(db, document_id)
+    except service.DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Stored file is missing or unreadable for document '{document_id}'",
+        ) from exc
+
+    return FileResponse(path, media_type="application/pdf")
 
 
 @router.post("/delete", response_model=DeleteSourcesResponse)

@@ -44,11 +44,18 @@ const THREE_DOCS = [
   { id: 'doc-c', name: 'c.pdf', sizeBytes: 1024, uploadedAt: '2026-07-13T10:00:00Z', status: 'processed' },
 ]
 
-function stubFetch(docs: unknown[] | null = null) {
+function stubFetch(
+  docs: unknown[] | null = null,
+  savedEmbeddingsByChunkId: Record<string, unknown[]> = {},
+) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
+      if (url.includes('/api/embeddings/saved')) {
+        const chunkId = decodeURIComponent(/chunkId=([^&]+)/.exec(url)?.[1] ?? '')
+        return jsonResponse({ embeddings: savedEmbeddingsByChunkId[chunkId] ?? [] })
+      }
       if (url.includes('/api/embeddings/models')) {
         return jsonResponse({ models: [{ id: 'bert', label: 'BERT (bert-base-uncased)' }] })
       }
@@ -424,8 +431,12 @@ describe('useChunkEmbeddings — Entire Corpus (018-ui-polish-batch US2)', () =>
     })
 
     await waitFor(() => expect(result.current.generateStatus).toBe('success'))
-    expect(result.current.batchResults.map((r) => r.status)).toEqual(['success', 'failed', 'success'])
-    expect(result.current.batchResults[1].errorMessage).toMatch(/no saved chunks/i)
+    expect(result.current.generateBatchResults.map((r) => r.status)).toEqual([
+      'success',
+      'failed',
+      'success',
+    ])
+    expect(result.current.generateBatchResults[1].errorMessage).toMatch(/no saved chunks/i)
   })
 
   it('saves embeddings for every document sequentially using the batch model', async () => {
@@ -461,5 +472,116 @@ describe('useChunkEmbeddings — Entire Corpus (018-ui-polish-batch US2)', () =>
 
     await waitFor(() => expect(result.current.saveStatus).toBe('success'))
     expect(result.current.hasSavedOnce).toBe(true)
+  })
+
+  it('reports the correct saved-per-document counts in saveBatchResults, distinct from generateBatchResults', async () => {
+    stubFetch(THREE_DOCS)
+    vi.stubGlobal('EventSource', MockEventSource)
+    MockEventSource.instances = []
+
+    const { result } = renderHook(() => useChunkEmbeddings('corpus-1', ENTIRE_CORPUS_SELECTION))
+    await waitFor(() => expect(result.current.documents).toHaveLength(3))
+
+    act(() => {
+      result.current.generate(ENTIRE_CORPUS_SELECTION, 'bert')
+    })
+    for (let i = 0; i < 3; i += 1) {
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(i + 1))
+      act(() => {
+        MockEventSource.latest().emit('result', {
+          documentId: 'doc',
+          model: 'bert',
+          vectors: [{ chunkId: 'c1', model: 'bert', dims: 1, vector: [0.1] }],
+        })
+      })
+    }
+    await waitFor(() => expect(result.current.generateStatus).toBe('success'))
+    expect(result.current.generateBatchResults.every((r) => r.result?.vectors.length === 1)).toBe(
+      true,
+    )
+
+    act(() => {
+      result.current.save()
+    })
+    for (let i = 0; i < 3; i += 1) {
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(4 + i))
+      act(() => {
+        MockEventSource.latest().emit('result', { documentId: 'doc', model: 'bert', savedCount: 5 })
+      })
+    }
+
+    await waitFor(() => expect(result.current.saveStatus).toBe('success'))
+    // The real bug this guards against: saveBatchResults must carry `savedCount` (from
+    // EmbeddingSaveResult), not `vectors` (from EmbeddingGenerateResult) — reusing one shared,
+    // incorrectly-typed state field previously made every saved count silently read as 0.
+    expect(result.current.saveBatchResults.every((r) => r.result?.savedCount === 5)).toBe(true)
+    // generateBatchResults from the earlier generate() call must still be intact, untouched by save().
+    expect(result.current.generateBatchResults.every((r) => r.result?.vectors.length === 1)).toBe(
+      true,
+    )
+  })
+})
+
+describe('useChunkEmbeddings — existing saved embeddings (adjacent fix, post-021-sources-chunking-embeddings-refresh)', () => {
+  it('reports existing embeddings for a single document already embedded with the selected model', async () => {
+    stubFetch(null, {
+      'chunk-1': [{ id: 'e1', model: 'bert', createdAt: '2026-07-28T00:00:00Z', dims: 1, vector: [0.1] }],
+      'chunk-2': [{ id: 'e2', model: 'bert', createdAt: '2026-07-28T00:00:00Z', dims: 1, vector: [0.2] }],
+    })
+
+    const { result } = renderHook(() => useChunkEmbeddings('corpus-1', 'report.pdf', 'bert'))
+
+    await waitFor(() =>
+      expect(result.current.existingEmbeddingsSummary).toEqual([
+        { documentId: 'report.pdf', documentName: 'report.pdf', existingCount: 2, totalChunks: 2 },
+      ]),
+    )
+  })
+
+  it('reports zero existing embeddings when saved embeddings exist only for a different model', async () => {
+    stubFetch(null, {
+      'chunk-1': [{ id: 'e1', model: 'minilm', createdAt: '2026-07-28T00:00:00Z', dims: 1, vector: [0.1] }],
+      'chunk-2': [],
+    })
+
+    const { result } = renderHook(() => useChunkEmbeddings('corpus-1', 'report.pdf', 'bert'))
+
+    await waitFor(() =>
+      expect(result.current.existingEmbeddingsSummary).toEqual([
+        { documentId: 'report.pdf', documentName: 'report.pdf', existingCount: 0, totalChunks: 2 },
+      ]),
+    )
+  })
+
+  it('auto-selects the first available model as activeModel, the same way document selection auto-falls-back', async () => {
+    stubFetch(null, {
+      'chunk-1': [{ id: 'e1', model: 'bert', createdAt: '2026-07-28T00:00:00Z', dims: 1, vector: [0.1] }],
+      'chunk-2': [],
+    })
+
+    const { result } = renderHook(() => useChunkEmbeddings('corpus-1', 'report.pdf'))
+
+    await waitFor(() => expect(result.current.activeModel).toBe('bert'))
+    expect(result.current.existingEmbeddingsSummary).toEqual([
+      { documentId: 'report.pdf', documentName: 'report.pdf', existingCount: 1, totalChunks: 2 },
+    ])
+  })
+
+  it('reports existing embeddings per document under "Entire Corpus" scope', async () => {
+    stubFetch(THREE_DOCS, {
+      'chunk-1': [{ id: 'e1', model: 'bert', createdAt: '2026-07-28T00:00:00Z', dims: 1, vector: [0.1] }],
+      'chunk-2': [],
+    })
+
+    const { result } = renderHook(() =>
+      useChunkEmbeddings('corpus-1', ENTIRE_CORPUS_SELECTION, 'bert'),
+    )
+
+    await waitFor(() => expect(result.current.existingEmbeddingsSummary.length).toBe(3))
+    expect(result.current.existingEmbeddingsSummary).toEqual([
+      { documentId: 'doc-a', documentName: 'a.pdf', existingCount: 1, totalChunks: 2 },
+      { documentId: 'doc-b', documentName: 'b.pdf', existingCount: 1, totalChunks: 2 },
+      { documentId: 'doc-c', documentName: 'c.pdf', existingCount: 1, totalChunks: 2 },
+    ])
   })
 })

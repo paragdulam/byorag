@@ -47,3 +47,10 @@ export interface ProjectionMethodOption {
   label: string
   available: boolean
 }
+
+export interface ProjectionPoint {
+  chunkId: string
+  documentId: string
+  x: number
+  y: number
+}

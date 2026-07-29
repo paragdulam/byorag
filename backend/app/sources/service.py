@@ -215,6 +215,24 @@ def unlink_document_from_corpus(db: Session, document_id: str, corpus_id: str) -
     storage_path.unlink(missing_ok=True)
 
 
+def get_document_file_path(db: Session, document_id: str) -> Path:
+    """Resolves a document's stored PDF path for the file-serving endpoint
+    (021-sources-chunking-embeddings-refresh contracts/sources-file-api.md).
+    Raises `DocumentNotFoundError` for an unknown id, or `FileNotFoundError` if
+    the row exists but its file no longer resolves on disk — kept distinct so
+    the router can return the two different 404 messages the contract requires.
+    """
+    document = get_document_or_none(db, document_id)
+    if document is None:
+        raise DocumentNotFoundError(document_id)
+
+    storage_path = Path(document.storage_path)
+    if not storage_path.is_file():
+        raise FileNotFoundError(document_id)
+
+    return storage_path
+
+
 def delete_documents(db: Session, ids: list[str]) -> list[DeletionResult]:
     results: list[DeletionResult] = []
     for document_id in ids:

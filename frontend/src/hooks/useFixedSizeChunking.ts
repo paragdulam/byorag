@@ -1,10 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChunkingResult, ChunkRunResponse } from '../types/chunking'
 import type { SourceDocument } from '../types/sourceDocument'
-import { runChunkingStream, saveChunksStream } from '../lib/chunkingApi'
+import { runChunkingStream, saveChunksStream, listSavedChunks } from '../lib/chunkingApi'
 import { listSources } from '../lib/sourcesApi'
 import { isEntireCorpusSelection } from '../lib/entireCorpusSelection'
 import { runSequentialBatch, type BatchItemResult, type BatchProgress } from '../lib/batchRunner'
+
+export type ChunkOrigin = 'auto-loaded' | 'computed' | null
+
+// Saved chunks (`GET /api/chunking/saved-chunks`) carry no chunkSize/overlap metadata — those
+// values aren't rendered anywhere for an auto-loaded result (021-sources-chunking-embeddings-
+// refresh research.md, data-model.md), so 0 is a safe placeholder, never displayed as such.
+function toChunkingResult(chunks: { index: number; content: string }[]): ChunkingResult {
+  return {
+    chunks,
+    totalChunks: chunks.length,
+    strategy: 'fixed-size',
+    chunkSize: 0,
+    overlap: 0,
+  }
+}
 
 export type ChunkingRunStatus = 'idle' | 'running' | 'success' | 'extraction-failed' | 'error'
 export type ChunkingSaveStatus = 'idle' | 'saving' | 'success' | 'error'
@@ -66,9 +81,11 @@ function saveChunksStreamAsPromise(
 export interface UseFixedSizeChunking {
   documents: SourceDocument[]
   isLoadingDocuments: boolean
+  activeDocumentId: string
   status: ChunkingRunStatus
   progressPercent: number
   result: ChunkingResult | null
+  chunkOrigin: ChunkOrigin
   saveStatus: ChunkingSaveStatus
   saveProgressPercent: number
   hasSavedOnce: boolean
@@ -80,17 +97,32 @@ export interface UseFixedSizeChunking {
   save: () => Promise<void>
 }
 
-export function useFixedSizeChunking(corpusId: string | null): UseFixedSizeChunking {
+/**
+ * `selectedDocumentId` is the raw dropdown value (may be `''` before the user picks anything,
+ * or the `ENTIRE_CORPUS_SELECTION` sentinel). The hook derives `activeDocumentId` from it
+ * (falling back to the first loaded document) and auto-loads that selection's saved chunks on
+ * mount/selection-change (021-sources-chunking-embeddings-refresh spec FR-001–FR-003) — separate
+ * from `run()`, which stays a purely explicit, caller-triggered recompute.
+ */
+export function useFixedSizeChunking(
+  corpusId: string | null,
+  selectedDocumentId: string = '',
+): UseFixedSizeChunking {
   const [documents, setDocuments] = useState<SourceDocument[]>([])
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(corpusId !== null)
   const [status, setStatus] = useState<ChunkingRunStatus>('idle')
   const [progressPercent, setProgressPercent] = useState(0)
   const [result, setResult] = useState<ChunkingResult | null>(null)
+  const [chunkOrigin, setChunkOrigin] = useState<ChunkOrigin>(null)
   const [saveStatus, setSaveStatus] = useState<ChunkingSaveStatus>('idle')
   const [saveProgressPercent, setSaveProgressPercent] = useState(0)
   const [hasSavedOnce, setHasSavedOnce] = useState(false)
   const [currentSelection, setCurrentSelection] = useState<string | null>(null)
   const [currentRunParams, setCurrentRunParams] = useState<RunParams | null>(null)
+  // Guards the auto-load effects below against clobbering a manual run() that completes (or is
+  // triggered) while a saved-chunks fetch for the same selection is still in flight — reset
+  // whenever the active selection changes, flipped true the moment run() is called.
+  const userTriggeredRunRef = useRef(false)
   // Each run() call gets its own identity (a monotonically increasing counter), not just
   // its parameters — the spec requires that re-running with identical settings shows
   // "unsaved" again, even though a save of that new run would persist byte-identical
@@ -130,16 +162,95 @@ export function useFixedSizeChunking(corpusId: string | null): UseFixedSizeChunk
     }
   }, [corpusId])
 
-  const isEntireCorpus = currentSelection !== null && isEntireCorpusSelection(currentSelection)
+  const activeDocumentId = selectedDocumentId || documents[0]?.id || ''
+
+  // Auto-load a single document's saved chunks whenever the active selection changes (spec
+  // FR-001/FR-002) — separate from run(), which is the only thing allowed to *recompute* them.
+  useEffect(() => {
+    userTriggeredRunRef.current = false
+
+    if (activeDocumentId === '' || isEntireCorpusSelection(activeDocumentId)) {
+      return
+    }
+
+    let cancelled = false
+    listSavedChunks(activeDocumentId).then((chunks) => {
+      if (cancelled || userTriggeredRunRef.current) {
+        return
+      }
+      if (chunks.length > 0) {
+        setResult(toChunkingResult(chunks))
+        setStatus('success')
+        setChunkOrigin('auto-loaded')
+        setHasSavedOnce(true)
+      } else {
+        setResult(null)
+        setStatus('idle')
+        setChunkOrigin(null)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeDocumentId])
+
+  // Same auto-load, fanned out across every document in the corpus for "Entire Corpus" (spec
+  // FR-003) — mirrors the read-only concurrent-fetch pattern already used by useVectorView's
+  // chunkGroups effect (018-ui-polish-batch).
+  useEffect(() => {
+    if (!isEntireCorpusSelection(activeDocumentId)) {
+      return
+    }
+
+    if (documents.length === 0) {
+      setBatchResults([])
+      return
+    }
+
+    let cancelled = false
+    Promise.all(
+      documents.map((doc) =>
+        listSavedChunks(doc.id).then((chunks) => ({
+          documentId: doc.id,
+          documentName: doc.name,
+          status: 'success' as const,
+          result: { extractionFailed: false, result: toChunkingResult(chunks) },
+        })),
+      ),
+    ).then((results) => {
+      if (cancelled || userTriggeredRunRef.current) {
+        return
+      }
+      setBatchResults(results)
+      setStatus('success')
+      setChunkOrigin('auto-loaded')
+      if (results.some((r) => r.result.result.totalChunks > 0)) {
+        setHasSavedOnce(true)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeDocumentId, documents])
+
+  // `isEntireCorpus` reflects the last completed run() once one has happened (`currentSelection`),
+  // and otherwise falls back to the currently active dropdown selection — so the entire-corpus
+  // summary UI renders for auto-loaded results too, before any run() has occurred.
+  const effectiveSelection = currentSelection ?? activeDocumentId
+  const isEntireCorpus = effectiveSelection !== '' && isEntireCorpusSelection(effectiveSelection)
 
   const run = useCallback(
     (selection: string, chunkSize: number, overlap = 0) => {
+      userTriggeredRunRef.current = true
       closeStreamRef.current?.()
       setSaveStatus('idle')
       setSaveProgressPercent(0)
       setBatchResults([])
       setBatchProgress(null)
       setResult(null)
+      setChunkOrigin(null)
       setCurrentSelection(selection)
       setCurrentRunParams({ chunkSize, overlap })
       setCurrentRunId((id) => id + 1)
@@ -154,6 +265,7 @@ export function useFixedSizeChunking(corpusId: string | null): UseFixedSizeChunk
         ).then((results) => {
           setBatchProgress(null)
           setBatchResults(results)
+          setChunkOrigin('computed')
           setStatus(results.some((r) => r.status === 'success') ? 'success' : 'error')
         })
         return
@@ -169,6 +281,7 @@ export function useFixedSizeChunking(corpusId: string | null): UseFixedSizeChunk
           } else {
             setStatus('success')
             setResult(response.result)
+            setChunkOrigin('computed')
           }
         },
         onError: () => {
@@ -240,14 +353,18 @@ export function useFixedSizeChunking(corpusId: string | null): UseFixedSizeChunk
     }
   }, [currentRunParams, currentRunId, currentSelection, documents])
 
-  const isSaved = status === 'success' && savedRunId === currentRunId
+  // Auto-loaded chunks are, by definition, already persisted (that's why they exist to load) —
+  // "Saved" should read as such even though save() was never called in this session.
+  const isSaved = chunkOrigin === 'auto-loaded' || (status === 'success' && savedRunId === currentRunId)
 
   return {
     documents,
     isLoadingDocuments,
+    activeDocumentId,
     status,
     progressPercent,
     result,
+    chunkOrigin,
     saveStatus,
     saveProgressPercent,
     hasSavedOnce,

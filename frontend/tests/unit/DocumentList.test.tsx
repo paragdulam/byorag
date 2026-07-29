@@ -148,3 +148,47 @@ describe('DocumentList name wrapping (018-ui-polish-batch US3)', () => {
     expect(screen.getByRole('table').className).toMatch(/table-fixed/)
   })
 })
+
+describe('DocumentList name wrapping in the narrower split-pane layout (022-chunk-preview-ui-fixes US1)', () => {
+  it('does not clip or truncate the name cell — no truncate/whitespace-nowrap/overflow-hidden classes', () => {
+    const documents = [makeDoc({ name: 'a-fairly-long-document-name-with-several-words.pdf' })]
+
+    render(<DocumentList documents={documents} onExportCsv={vi.fn()} onDeleteDocuments={vi.fn()} />)
+
+    const cell = screen.getByText('a-fairly-long-document-name-with-several-words.pdf')
+    expect(cell.className).not.toMatch(/truncate|whitespace-nowrap|overflow-hidden/)
+  })
+
+  it('does not force a fixed row height that would clip wrapped content', () => {
+    const documents = [makeDoc()]
+
+    render(<DocumentList documents={documents} onExportCsv={vi.fn()} onDeleteDocuments={vi.fn()} />)
+
+    const row = screen.getByRole('table').querySelector('tbody tr')
+    expect(row?.className ?? '').not.toMatch(/\bh-\d+\b|overflow-hidden/)
+  })
+
+  it('gives the name column a generous explicit share of the table width, freeing space from the now-oversized actions column', () => {
+    const documents = [makeDoc()]
+
+    render(<DocumentList documents={documents} onExportCsv={vi.fn()} onDeleteDocuments={vi.fn()} />)
+
+    const headers = screen.getAllByRole('columnheader')
+    const nameHeader = headers.find((h) => h.textContent === 'DOCUMENT NAME')
+    const actionsHeader = headers[headers.length - 1]
+    expect(nameHeader?.className).toMatch(/w-1\/2|w-auto/)
+    expect(actionsHeader?.className).not.toMatch(/w-64/)
+  })
+
+  it('wraps the table in a horizontally-scrollable container as a safety net for unbroken long tokens', () => {
+    const documents = [makeDoc()]
+
+    const { container } = render(
+      <DocumentList documents={documents} onExportCsv={vi.fn()} onDeleteDocuments={vi.fn()} />,
+    )
+
+    const scrollWrapper = container.querySelector('.overflow-x-auto')
+    expect(scrollWrapper).not.toBeNull()
+    expect(scrollWrapper?.querySelector('table')).not.toBeNull()
+  })
+})

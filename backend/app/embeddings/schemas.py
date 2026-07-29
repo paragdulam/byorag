@@ -51,3 +51,25 @@ class ProjectionMethodOption(BaseModel):
 
 class ListProjectionMethodsResponse(BaseModel):
     methods: list[ProjectionMethodOption]
+
+
+class ProjectionRequestEntry(BaseModel):
+    chunkId: str
+    documentId: str
+    vector: list[float]
+
+
+class ProjectionRequest(BaseModel):
+    method: str
+    entries: list[ProjectionRequestEntry]
+
+
+class ProjectionPointOut(BaseModel):
+    chunkId: str
+    documentId: str
+    x: float
+    y: float
+
+
+class ProjectionResponse(BaseModel):
+    points: list[ProjectionPointOut]

@@ -80,6 +80,9 @@ describe('Cross-section scoping from the Corpora screen (009-corpora-screen US2)
             ],
           })
         }
+        if (href.includes('/api/chunking/saved-chunks')) {
+          return jsonResponse({ chunks: [] })
+        }
         return jsonResponse({ documents: [], rejections: [] })
       }),
     )
@@ -171,6 +174,9 @@ describe('Deleting the active corpus falls back correctly (009-corpora-screen US
               },
             ],
           })
+        }
+        if (href.includes('/api/chunking/saved-chunks')) {
+          return jsonResponse({ chunks: [] })
         }
         return jsonResponse({ documents: [], rejections: [] })
       }),

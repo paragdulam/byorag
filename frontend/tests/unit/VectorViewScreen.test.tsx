@@ -1,4 +1,4 @@
-import { render as rtlRender, screen, within } from '@testing-library/react'
+import { render as rtlRender, screen, within, waitFor, fireEvent } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { VectorViewScreen } from '../../src/components/vector-view/VectorViewScreen'
@@ -42,8 +42,8 @@ function mockState(overrides: Partial<UseVectorView> = {}): UseVectorView {
     isLoadingSavedEmbeddings: false,
     projectionMethods: [
       { id: 'vector', label: 'Vector', available: true },
-      { id: 'umap', label: 'UMAP', available: false },
-      { id: 'pca', label: 'PCA', available: false },
+      { id: 'umap', label: 'UMAP', available: true },
+      { id: 'pca', label: 'PCA', available: true },
     ],
     isEntireCorpus: false,
     chunkGroups: [],
@@ -139,8 +139,22 @@ describe('VectorViewScreen — projection method dropdown (014-vector-view-scree
     expect(select.value).toBe('vector')
   })
 
-  it('shows a "not available yet" message instead of the grid when an unavailable method is selected', async () => {
-    const userEvent = (await import('@testing-library/user-event')).default
+  it('disables UMAP/PCA options and hints at the minimum once resolved with too few embedded chunks (021-sources-chunking-embeddings-refresh)', async () => {
+    mockState({
+      savedEmbeddings: [
+        { id: 'emb-1', model: 'bert', createdAt: '2026-07-15T10:03:00Z', dims: 1, vector: [0.5] },
+      ],
+    })
+
+    render(<VectorViewScreen onNavigate={vi.fn()} />)
+
+    const select = screen.getByLabelText(/projection method/i) as HTMLSelectElement
+    const umapOption = within(select).getByRole('option', { name: /umap/i }) as HTMLOptionElement
+    await waitFor(() => expect(umapOption.disabled).toBe(true))
+    expect(umapOption.textContent).toMatch(/needs 5\+ embedded chunks/i)
+  })
+
+  it('shows the minimum-entries message instead of the grid when UMAP/PCA is selected with too few embedded chunks', async () => {
     mockState({
       savedEmbeddings: [
         { id: 'emb-1', model: 'bert', createdAt: '2026-07-15T10:03:00Z', dims: 1, vector: [0.5] },
@@ -150,14 +164,13 @@ describe('VectorViewScreen — projection method dropdown (014-vector-view-scree
     render(<VectorViewScreen onNavigate={vi.fn()} />)
 
     const select = screen.getByLabelText(/projection method/i)
-    await userEvent.selectOptions(select, 'umap')
+    fireEvent.change(select, { target: { value: 'umap' } })
 
-    expect(screen.getByText(/not available yet/i)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('projection-minimum-message')).toBeInTheDocument())
     expect(screen.queryByTestId('vector-grid')).not.toBeInTheDocument()
   })
 
   it('restores the grid when switching back to "Vector"', async () => {
-    const userEvent = (await import('@testing-library/user-event')).default
     mockState({
       savedEmbeddings: [
         { id: 'emb-1', model: 'bert', createdAt: '2026-07-15T10:03:00Z', dims: 1, vector: [0.5] },
@@ -167,11 +180,113 @@ describe('VectorViewScreen — projection method dropdown (014-vector-view-scree
     render(<VectorViewScreen onNavigate={vi.fn()} />)
 
     const select = screen.getByLabelText(/projection method/i)
-    await userEvent.selectOptions(select, 'umap')
-    await userEvent.selectOptions(select, 'vector')
+    fireEvent.change(select, { target: { value: 'umap' } })
+    await waitFor(() => expect(screen.getByTestId('projection-minimum-message')).toBeInTheDocument())
+    fireEvent.change(select, { target: { value: 'vector' } })
 
     expect(screen.getByTestId('vector-grid')).toBeInTheDocument()
-    expect(screen.queryByText(/not available yet/i)).not.toBeInTheDocument()
+    expect(screen.queryByTestId('projection-minimum-message')).not.toBeInTheDocument()
+  })
+})
+
+describe('VectorViewScreen — UMAP/PCA embedding projection (021-sources-chunking-embeddings-refresh US4)', () => {
+  it('renders the projection view once 5+ embedded chunks resolve for the selected document', async () => {
+    const userEvent = (await import('@testing-library/user-event')).default
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('/api/embeddings/saved')) {
+          const chunkId = decodeURIComponent(/chunkId=([^&]+)/.exec(url)?.[1] ?? '')
+          return new Response(
+            JSON.stringify({
+              embeddings: [
+                { id: `${chunkId}-e`, model: 'bert', createdAt: '2026-07-28T00:00:00Z', dims: 2, vector: [1, 2] },
+              ],
+            }),
+            { status: 200 },
+          )
+        }
+        if (url.includes('/api/embeddings/project')) {
+          const body = JSON.parse((init?.body as string) ?? '{}') as {
+            entries: { chunkId: string; documentId: string }[]
+          }
+          return new Response(
+            JSON.stringify({
+              points: body.entries.map((e, i) => ({ chunkId: e.chunkId, documentId: e.documentId, x: i, y: i })),
+            }),
+            { status: 200 },
+          )
+        }
+        throw new Error(`Unexpected fetch: ${url}`)
+      }),
+    )
+    mockState({
+      savedChunks: Array.from({ length: 5 }, (_, i) => ({ id: `c${i}`, index: i, content: `chunk ${i}` })),
+    })
+
+    render(<VectorViewScreen onNavigate={vi.fn()} />)
+
+    const select = screen.getByLabelText(/projection method/i)
+    await userEvent.selectOptions(select, 'umap')
+
+    await waitFor(() =>
+      expect(screen.getByTestId('embedding-projection-view')).toBeInTheDocument(),
+    )
+    expect(screen.queryByTestId('projection-minimum-message')).not.toBeInTheDocument()
+
+    vi.unstubAllGlobals()
+  })
+
+  it('reports excluded documents (zero embedded chunks) in Entire Corpus scope', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/api/embeddings/saved')) {
+          const chunkId = decodeURIComponent(/chunkId=([^&]+)/.exec(url)?.[1] ?? '')
+          const embedded = chunkId.startsWith('a')
+          return new Response(
+            JSON.stringify({
+              embeddings: embedded
+                ? [{ id: `${chunkId}-e`, model: 'bert', createdAt: '2026-07-28T00:00:00Z', dims: 2, vector: [1, 2] }]
+                : [],
+            }),
+            { status: 200 },
+          )
+        }
+        if (url.includes('/api/embeddings/project')) {
+          return new Response(JSON.stringify({ points: [] }), { status: 200 })
+        }
+        throw new Error(`Unexpected fetch: ${url}`)
+      }),
+    )
+    mockState({
+      isEntireCorpus: true,
+      chunkGroups: [
+        {
+          documentId: 'doc-a',
+          documentName: 'a.pdf',
+          chunks: Array.from({ length: 5 }, (_, i) => ({ id: `a${i}`, index: i, content: `a chunk ${i}` })),
+        },
+        {
+          documentId: 'doc-b',
+          documentName: 'b.pdf',
+          chunks: [{ id: 'b0', index: 0, content: 'b chunk 0' }],
+        },
+      ],
+    })
+
+    render(<VectorViewScreen onNavigate={vi.fn()} />)
+
+    const select = screen.getByLabelText(/projection method/i)
+    fireEvent.change(select, { target: { value: 'pca' } })
+
+    await waitFor(() =>
+      expect(screen.getByTestId('projection-excluded-documents')).toHaveTextContent('b.pdf'),
+    )
+
+    vi.unstubAllGlobals()
   })
 })
 

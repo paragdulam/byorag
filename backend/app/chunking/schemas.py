@@ -31,3 +31,29 @@ class SavedChunk(BaseModel):
 
 class SavedChunksResponse(BaseModel):
     chunks: list[SavedChunk]
+
+
+class PreviewSegment(BaseModel):
+    start: int
+    end: int
+    kind: Literal["chunk", "overlap"]
+    chunkIndex: int | None
+
+
+class PagePosition(BaseModel):
+    pageNumber: int
+    start: int
+    end: int
+
+
+class ChunkRange(BaseModel):
+    chunkIndex: int
+    start: int
+    end: int
+
+
+class StructuredPreviewResponse(BaseModel):
+    fullText: str
+    segments: list[PreviewSegment]
+    pages: list[PagePosition]
+    chunkRanges: list[ChunkRange]

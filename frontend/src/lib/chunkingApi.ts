@@ -5,6 +5,33 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 const CHUNKING_STREAM_ENDPOINT = `${API_BASE_URL}/api/chunking/run/stream`
 const CHUNKING_SAVE_STREAM_ENDPOINT = `${API_BASE_URL}/api/chunking/save/stream`
 const CHUNKING_SAVED_CHUNKS_ENDPOINT = `${API_BASE_URL}/api/chunking/saved-chunks`
+const CHUNKING_STRUCTURED_PREVIEW_ENDPOINT = `${API_BASE_URL}/api/chunking/structured-preview`
+
+export interface PreviewSegment {
+  start: number
+  end: number
+  kind: 'chunk' | 'overlap'
+  chunkIndex: number | null
+}
+
+export interface PagePosition {
+  pageNumber: number
+  start: number
+  end: number
+}
+
+export interface ChunkRange {
+  chunkIndex: number
+  start: number
+  end: number
+}
+
+export interface StructuredPreview {
+  fullText: string
+  segments: PreviewSegment[]
+  pages: PagePosition[]
+  chunkRanges: ChunkRange[]
+}
 
 export interface ChunkingStreamHandlers {
   onProgress: (percent: number) => void
@@ -105,4 +132,21 @@ export async function listSavedChunks(documentId: string): Promise<SavedChunk[]>
 
   const body = (await response.json()) as { chunks: SavedChunk[] }
   return body.chunks
+}
+
+/**
+ * Reads a document's structure-preserving extracted text plus its chunk/overlap segment map
+ * (contracts/chunking-structured-preview-api.md, 022-chunk-preview-ui-fixes) for Chunked Preview
+ * v2's continuous, background-only-highlighted rendering.
+ */
+export async function fetchStructuredPreview(documentId: string): Promise<StructuredPreview> {
+  const url = `${CHUNKING_STRUCTURED_PREVIEW_ENDPOINT}?documentId=${encodeURIComponent(documentId)}`
+  const response = await fetch(url)
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { detail?: string } | null
+    throw new Error(body?.detail ?? `Failed to load structured preview: ${response.status}`)
+  }
+
+  return (await response.json()) as StructuredPreview
 }

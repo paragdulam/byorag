@@ -16,6 +16,8 @@ dependencies = [
     "transformers>=4.45",
     "torch>=2.4",
     "anthropic>=0.40",
+    "scikit-learn>=1.5",
+    "umap-learn>=0.5",
 ]
 
 [dependency-groups]

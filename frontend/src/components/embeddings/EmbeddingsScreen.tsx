@@ -4,7 +4,9 @@ import type { ScreenId } from '../layout/SidebarNav'
 import { useChunkEmbeddings } from '../../hooks/useChunkEmbeddings'
 import { useCorpus } from '../../context/CorpusContext'
 import { ENTIRE_CORPUS_SELECTION, isEntireCorpusSelection } from '../../lib/entireCorpusSelection'
-import { computeCombinedPercent, formatBatchProgressLabel } from '../../lib/batchRunner'
+import { BatchProgressBar } from '../shared/BatchProgressBar'
+import { AlreadyDoneIndicator } from '../shared/AlreadyDoneIndicator'
+import { EntireCorpusSummaryList } from '../shared/EntireCorpusSummaryList'
 
 export interface EmbeddingsScreenProps {
   onNavigate: (screen: ScreenId) => void
@@ -18,6 +20,7 @@ export function EmbeddingsScreen({ onNavigate }: EmbeddingsScreenProps) {
   const {
     documents,
     models,
+    activeModel,
     savedChunks,
     generateStatus,
     progressPercent,
@@ -29,8 +32,11 @@ export function EmbeddingsScreen({ onNavigate }: EmbeddingsScreenProps) {
     hasSavedOnce,
     isEntireCorpus,
     batchProgress,
-    batchResults,
-  } = useChunkEmbeddings(activeCorpusId, selectedDocumentId || null)
+    generateBatchResults,
+    saveBatchResults,
+    existingEmbeddingsSummary,
+    isLoadingExistingEmbeddings,
+  } = useChunkEmbeddings(activeCorpusId, selectedDocumentId || null, selectedModel)
 
   // Keeps selectedDocumentId itself valid once documents load, so the hook call above
   // (and not just the display value below) receives the auto-selected document — otherwise,
@@ -45,8 +51,13 @@ export function EmbeddingsScreen({ onNavigate }: EmbeddingsScreenProps) {
     )
   }, [documents])
 
+  // Same pattern for the model picker, so the hook receives the auto-selected model too —
+  // otherwise, with only one model, existingEmbeddingsSummary would never resolve.
+  useEffect(() => {
+    setSelectedModel((prev) => (models.some((model) => model.id === prev) ? prev : (models[0]?.id ?? '')))
+  }, [models])
+
   const activeDocumentId = selectedDocumentId || documents[0]?.id || ''
-  const activeModel = selectedModel || models[0]?.id || ''
 
   return (
     <AppShell activeScreen="embeddings" onNavigate={onNavigate}>
@@ -117,23 +128,7 @@ export function EmbeddingsScreen({ onNavigate }: EmbeddingsScreenProps) {
             {generateStatus === 'generating' && (
               <div className="mt-4 shrink-0">
                 {isEntireCorpus && batchProgress ? (
-                  <>
-                    <div
-                      role="progressbar"
-                      aria-valuenow={computeCombinedPercent(batchProgress)}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      className="h-2 w-full overflow-hidden rounded bg-surface-container"
-                    >
-                      <div
-                        className="h-full bg-primary-container transition-[width]"
-                        style={{ width: `${computeCombinedPercent(batchProgress)}%` }}
-                      />
-                    </div>
-                    <p className="mt-1 text-xs text-on-surface-variant">
-                      {formatBatchProgressLabel(batchProgress)}… {computeCombinedPercent(batchProgress)}%
-                    </p>
-                  </>
+                  <BatchProgressBar progress={batchProgress} />
                 ) : (
                   <>
                     <div
@@ -162,31 +157,52 @@ export function EmbeddingsScreen({ onNavigate }: EmbeddingsScreenProps) {
               </p>
             )}
 
+            {generateBatchResults.length === 0 &&
+              saveBatchResults.length === 0 &&
+              isLoadingExistingEmbeddings &&
+              existingEmbeddingsSummary.length === 0 && (
+                <p className="mt-2 shrink-0 text-sm text-on-surface-variant" role="status">
+                  Checking for existing embeddings…
+                </p>
+              )}
+
+            {generateBatchResults.length === 0 &&
+              saveBatchResults.length === 0 &&
+              existingEmbeddingsSummary.some((item) => item.existingCount > 0) && (
+                <AlreadyDoneIndicator
+                  verb="Embedding generation"
+                  noun="embeddings"
+                  scope={isEntireCorpus ? 'corpus' : 'document'}
+                />
+              )}
+
             <div
               data-testid="embeddings-chunk-list"
               className="mt-4 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto"
             >
-              {isEntireCorpus && batchResults.length > 0 ? (
-                <ul data-testid="entire-corpus-summary" className="flex flex-col gap-2">
-                  {batchResults.map((item) => (
-                    <li
-                      key={item.documentId}
-                      className="flex items-center justify-between rounded-lg border border-outline-variant bg-surface-container p-4"
-                    >
-                      <span className="text-on-surface">{item.documentName}</span>
-                      {item.status === 'success' ? (
-                        <span className="text-sm text-on-surface-variant">
-                          {item.result?.vectors.length ?? 0} embeddings generated
-                        </span>
-                      ) : (
-                        <span role="alert" className="text-sm text-error">
-                          {item.errorMessage ?? 'Failed'}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
+              {isEntireCorpus && saveBatchResults.length > 0 ? (
+                <EntireCorpusSummaryList
+                  results={saveBatchResults}
+                  formatSuccessLabel={(result) => `${result.savedCount} embeddings saved`}
+                />
+              ) : isEntireCorpus && generateBatchResults.length > 0 ? (
+                <EntireCorpusSummaryList
+                  results={generateBatchResults}
+                  formatSuccessLabel={(result) => `${result.vectors.length} embeddings generated`}
+                />
+              ) : isEntireCorpus && existingEmbeddingsSummary.length > 0 ? (
+                <EntireCorpusSummaryList
+                  results={existingEmbeddingsSummary.map((item) => ({
+                    documentId: item.documentId,
+                    documentName: item.documentName,
+                    status: 'success' as const,
+                    result: item,
+                  }))}
+                  formatSuccessLabel={(result) =>
+                    `${result.existingCount} of ${result.totalChunks} embeddings saved`
+                  }
+                />
+              ) : !isEntireCorpus ? (
                 <>
                   {savedChunks.length === 0 ? (
                     <p className="text-on-surface-variant">
@@ -211,29 +227,13 @@ export function EmbeddingsScreen({ onNavigate }: EmbeddingsScreenProps) {
                     </p>
                   )}
                 </>
-              )}
+              ) : null}
             </div>
 
             {saveStatus === 'saving' && (
               <div data-testid="embeddings-save-progress" className="mt-4 shrink-0">
                 {isEntireCorpus && batchProgress ? (
-                  <>
-                    <div
-                      role="progressbar"
-                      aria-valuenow={computeCombinedPercent(batchProgress)}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      className="h-2 w-full overflow-hidden rounded bg-surface-container"
-                    >
-                      <div
-                        className="h-full bg-primary-container transition-[width]"
-                        style={{ width: `${computeCombinedPercent(batchProgress)}%` }}
-                      />
-                    </div>
-                    <p className="mt-1 text-xs text-on-surface-variant">
-                      Saving… {formatBatchProgressLabel(batchProgress)}… {computeCombinedPercent(batchProgress)}%
-                    </p>
-                  </>
+                  <BatchProgressBar progress={batchProgress} />
                 ) : (
                   <>
                     <div

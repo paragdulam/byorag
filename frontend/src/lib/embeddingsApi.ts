@@ -3,6 +3,7 @@ import type {
   EmbeddingModelOption,
   EmbeddingSaveResult,
   ProjectionMethodOption,
+  ProjectionPoint,
   SavedEmbedding,
 } from '../types/embeddings'
 
@@ -12,6 +13,7 @@ const EMBEDDINGS_GENERATE_ENDPOINT = `${API_BASE_URL}/api/embeddings/generate/st
 const EMBEDDINGS_SAVE_ENDPOINT = `${API_BASE_URL}/api/embeddings/save/stream`
 const EMBEDDINGS_SAVED_ENDPOINT = `${API_BASE_URL}/api/embeddings/saved`
 const EMBEDDINGS_PROJECTION_METHODS_ENDPOINT = `${API_BASE_URL}/api/embeddings/projection-methods`
+const EMBEDDINGS_PROJECT_ENDPOINT = `${API_BASE_URL}/api/embeddings/project`
 
 /**
  * Lists the registered embedding models for the model picker (contracts/embeddings-api.md)
@@ -142,4 +144,36 @@ export async function listProjectionMethods(): Promise<ProjectionMethodOption[]>
 
   const body = (await response.json()) as { methods: ProjectionMethodOption[] }
   return body.methods
+}
+
+export interface ProjectionEntryInput {
+  chunkId: string
+  documentId: string
+  vector: number[]
+}
+
+/**
+ * Computes a 2D UMAP/PCA projection over already-saved chunk embeddings
+ * (contracts/embeddings-projection-api.md, 021-sources-chunking-embeddings-refresh). The caller
+ * is responsible for having fetched each entry's vector via `listSavedEmbeddings` first, and for
+ * keeping the method disabled below the minimum entry count — this call still surfaces the
+ * server's `422`/`400` messages verbatim if that's skipped.
+ */
+export async function fetchProjection(
+  method: string,
+  entries: ProjectionEntryInput[],
+): Promise<ProjectionPoint[]> {
+  const response = await fetch(EMBEDDINGS_PROJECT_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ method, entries }),
+  })
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { detail?: string } | null
+    throw new Error(body?.detail ?? `Failed to compute projection: ${response.status}`)
+  }
+
+  const body = (await response.json()) as { points: ProjectionPoint[] }
+  return body.points
 }

@@ -30,12 +30,9 @@ test.describe('Data Sources Screen', () => {
     // never appears anywhere on the screen.
     await expect(page.getByText('VECTOR STORAGE')).toHaveCount(0)
 
-    // 003-system-capacity-widget SC-002: real hardware info and a capacity
-    // estimate are visible for the machine actually running the app. Exact
-    // figures vary by machine, so only presence/shape is asserted here.
-    await expect(page.getByText('SYSTEM CAPACITY')).toBeVisible()
-    await expect(page.getByText(/PDFs \(estimated\)/)).toBeVisible()
-    await expect(page.getByText(/GB total \(estimated\)/)).toBeVisible()
+    // System Capacity widget is temporarily not rendered on this screen (kept in the
+    // codebase for future re-introduction).
+    await expect(page.getByText('SYSTEM CAPACITY')).toHaveCount(0)
 
     // SC-001: uploaded file appears within 2 seconds, no full page reload
     const validPdf = path.join(FIXTURES_DIR, 'valid.pdf')

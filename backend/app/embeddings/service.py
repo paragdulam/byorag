@@ -10,7 +10,64 @@ from app.db.models import Chunk as ChunkRow
 from app.db.models import Document
 from app.db.models import Embedding as EmbeddingRow
 from app.embeddings.models.base import EMBEDDING_MODELS
-from app.embeddings.schemas import EmbeddingGenerateResult, EmbeddingSaveResult, EmbeddingVectorOut
+from app.embeddings.projection_methods import PROJECTION_METHODS
+from app.embeddings.projections import base as projections_base
+from app.embeddings.projections import pca, umap  # noqa: F401  (register "pca"/"umap" on import)
+from app.embeddings.schemas import (
+    EmbeddingGenerateResult,
+    EmbeddingSaveResult,
+    EmbeddingVectorOut,
+    ProjectionPointOut,
+    ProjectionRequestEntry,
+)
+
+MIN_PROJECTION_ENTRIES = 5
+
+
+class UnknownProjectionMethodError(Exception):
+    def __init__(self, method: str) -> None:
+        super().__init__(f"Unknown or unavailable projection method {method!r}.")
+
+
+class InsufficientProjectionEntriesError(Exception):
+    def __init__(self, count: int) -> None:
+        self.count = count
+        super().__init__(
+            f"At least {MIN_PROJECTION_ENTRIES} embedded chunks are required to compute a "
+            f"projection; received {count}."
+        )
+
+
+class MismatchedProjectionDimensionsError(Exception):
+    def __init__(self) -> None:
+        super().__init__("All vectors must have the same dimension; received mixed dimensions.")
+
+
+def compute_projection(
+    method: str, entries: list[ProjectionRequestEntry]
+) -> list[ProjectionPointOut]:
+    """Computes a 2D projection (UMAP/PCA) over caller-supplied embedding vectors
+    (021-sources-chunking-embeddings-refresh contracts/embeddings-projection-api.md). The
+    frontend is expected to keep the projection method disabled below the minimum entry count —
+    this is a defensive server-side re-check, not the primary UX gate."""
+    method_info = PROJECTION_METHODS.get(method)
+    if method_info is None or not method_info.available or method not in projections_base.PROJECTIONS:
+        raise UnknownProjectionMethodError(method)
+
+    if len(entries) < MIN_PROJECTION_ENTRIES:
+        raise InsufficientProjectionEntriesError(len(entries))
+
+    dims = {len(entry.vector) for entry in entries}
+    if len(dims) > 1:
+        raise MismatchedProjectionDimensionsError()
+
+    strategy = projections_base.PROJECTIONS[method]
+    coordinates = strategy.project([entry.vector for entry in entries])
+
+    return [
+        ProjectionPointOut(chunkId=entry.chunkId, documentId=entry.documentId, x=x, y=y)
+        for entry, (x, y) in zip(entries, coordinates, strict=True)
+    ]
 
 StreamEventType = Literal["progress", "result", "error"]
 StreamEvent = tuple[

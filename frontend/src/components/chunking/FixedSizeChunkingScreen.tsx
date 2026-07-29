@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AppShell } from '../layout/AppShell'
 import type { ScreenId } from '../layout/SidebarNav'
 import { useFixedSizeChunking } from '../../hooks/useFixedSizeChunking'
 import { useCorpus } from '../../context/CorpusContext'
 import { ENTIRE_CORPUS_SELECTION } from '../../lib/entireCorpusSelection'
-import { computeCombinedPercent, formatBatchProgressLabel } from '../../lib/batchRunner'
+import { BatchProgressBar } from '../shared/BatchProgressBar'
+import { AlreadyDoneIndicator } from '../shared/AlreadyDoneIndicator'
+import { EntireCorpusSummaryList } from '../shared/EntireCorpusSummaryList'
+import { ChunkInContextPreview } from './ChunkInContextPreview'
 
 export interface FixedSizeChunkingScreenProps {
   onNavigate: (screen: ScreenId) => void
@@ -14,11 +17,14 @@ const SEPARATOR_OPTIONS = ['"\\n\\n"', '"\\n"', '" "', '""']
 
 export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenProps) {
   const { activeCorpusId } = useCorpus()
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string>('')
   const {
     documents,
+    activeDocumentId,
     status,
     progressPercent,
     result,
+    chunkOrigin,
     saveStatus,
     saveProgressPercent,
     hasSavedOnce,
@@ -28,15 +34,21 @@ export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenP
     batchResults,
     run,
     save,
-  } = useFixedSizeChunking(activeCorpusId)
+  } = useFixedSizeChunking(activeCorpusId, selectedDocumentId)
 
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string>('')
   const [chunkSizeInput, setChunkSizeInput] = useState('512')
   const [validationError, setValidationError] = useState<string | null>(null)
 
   const [overlapValue, setOverlapValue] = useState(50)
+  const [selectedChunkIndex, setSelectedChunkIndex] = useState(0)
 
-  const activeDocumentId = selectedDocumentId || documents[0]?.id || ''
+  // Re-defaults to the first chunk whenever a new saved-chunks result loads
+  // (023-pdf-fullscreen-chunk-view FR-007).
+  useEffect(() => {
+    setSelectedChunkIndex(0)
+  }, [result])
+
+  const isAutoLoaded = chunkOrigin === 'auto-loaded' && status === 'success'
 
   const handleRunChunking = () => {
     const chunkSize = Number(chunkSizeInput)
@@ -168,26 +180,18 @@ export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenP
               </p>
             )}
 
+            {isAutoLoaded && (
+              <AlreadyDoneIndicator
+                verb="Chunking"
+                noun="chunks"
+                scope={isEntireCorpus ? 'corpus' : 'document'}
+              />
+            )}
+
             {status === 'running' && (
               <div className="mt-4 shrink-0">
                 {isEntireCorpus && batchProgress ? (
-                  <>
-                    <div
-                      role="progressbar"
-                      aria-valuenow={computeCombinedPercent(batchProgress)}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      className="h-2 w-full overflow-hidden rounded bg-surface-container"
-                    >
-                      <div
-                        className="h-full bg-primary-container transition-[width]"
-                        style={{ width: `${computeCombinedPercent(batchProgress)}%` }}
-                      />
-                    </div>
-                    <p className="mt-1 text-xs text-on-surface-variant">
-                      {formatBatchProgressLabel(batchProgress)}… {computeCombinedPercent(batchProgress)}%
-                    </p>
-                  </>
+                  <BatchProgressBar progress={batchProgress} />
                 ) : (
                   <>
                     <div
@@ -215,25 +219,10 @@ export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenP
               className="mt-4 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto"
             >
               {isEntireCorpus && batchResults.length > 0 ? (
-                <ul data-testid="entire-corpus-summary" className="flex flex-col gap-2">
-                  {batchResults.map((item) => (
-                    <li
-                      key={item.documentId}
-                      className="flex items-center justify-between rounded-lg border border-outline-variant bg-surface-container p-4"
-                    >
-                      <span className="text-on-surface">{item.documentName}</span>
-                      {item.status === 'success' ? (
-                        <span className="text-sm text-on-surface-variant">
-                          {item.result?.result?.totalChunks ?? 0} chunks
-                        </span>
-                      ) : (
-                        <span role="alert" className="text-sm text-error">
-                          {item.errorMessage ?? 'Failed'}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+                <EntireCorpusSummaryList
+                  results={batchResults}
+                  formatSuccessLabel={(result) => `${result.result?.totalChunks ?? 0} chunks`}
+                />
               ) : (
                 <>
                   {status === 'extraction-failed' && (
@@ -249,24 +238,47 @@ export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenP
                   )}
 
                   {status === 'success' && result && (
-                    <>
-                      {result.chunks.map((chunk) => (
-                        <div
-                          key={chunk.index}
-                          className="rounded-lg border border-outline-variant bg-surface-container p-4"
-                        >
-                          <div className="font-mono text-xs text-tertiary">CHUNK_{chunk.index}</div>
-                          <p className="mt-2 text-on-surface">{chunk.content}</p>
-                        </div>
-                      ))}
+                    <div className="flex min-h-0 flex-1 gap-4">
+                      <div className="flex w-1/2 flex-col gap-3 overflow-y-auto">
+                        {result.chunks.map((chunk) => (
+                          <button
+                            key={chunk.index}
+                            type="button"
+                            aria-current={chunk.index === selectedChunkIndex ? 'true' : undefined}
+                            onClick={() => setSelectedChunkIndex(chunk.index)}
+                            className={
+                              'rounded-lg border p-4 text-left ' +
+                              (chunk.index === selectedChunkIndex
+                                ? 'border-primary bg-surface-container-high'
+                                : 'border-outline-variant bg-surface-container')
+                            }
+                          >
+                            <div className="font-mono text-xs text-tertiary">
+                              CHUNK_{chunk.index}
+                            </div>
+                            <p className="mt-2 text-on-surface">{chunk.content}</p>
+                          </button>
+                        ))}
 
-                      {result.totalChunks > result.chunks.length && (
-                        <p className="text-sm text-on-surface-variant">
-                          More chunks exist beyond the {result.chunks.length} shown here (
-                          {result.totalChunks} total).
-                        </p>
-                      )}
-                    </>
+                        {result.totalChunks > result.chunks.length && (
+                          <p className="text-sm text-on-surface-variant">
+                            More chunks exist beyond the {result.chunks.length} shown here (
+                            {result.totalChunks} total).
+                          </p>
+                        )}
+                      </div>
+
+                      <div
+                        data-testid="chunk-context-preview"
+                        className="w-1/2 overflow-y-auto rounded-lg border border-outline-variant bg-surface-container"
+                      >
+                        <ChunkInContextPreview
+                          documentId={activeDocumentId}
+                          selectedChunkIndex={selectedChunkIndex}
+                          hasUnsavedChanges={chunkOrigin === 'computed' && !isSaved}
+                        />
+                      </div>
+                    </div>
                   )}
                 </>
               )}
@@ -275,23 +287,7 @@ export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenP
             {saveStatus === 'saving' && (
               <div data-testid="save-progress" className="mt-4 shrink-0">
                 {isEntireCorpus && batchProgress ? (
-                  <>
-                    <div
-                      role="progressbar"
-                      aria-valuenow={computeCombinedPercent(batchProgress)}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      className="h-2 w-full overflow-hidden rounded bg-surface-container"
-                    >
-                      <div
-                        className="h-full bg-primary-container transition-[width]"
-                        style={{ width: `${computeCombinedPercent(batchProgress)}%` }}
-                      />
-                    </div>
-                    <p className="mt-1 text-xs text-on-surface-variant">
-                      Saving… {formatBatchProgressLabel(batchProgress)}… {computeCombinedPercent(batchProgress)}%
-                    </p>
-                  </>
+                  <BatchProgressBar progress={batchProgress} />
                 ) : (
                   <>
                     <div

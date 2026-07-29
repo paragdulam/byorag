@@ -1,6 +1,19 @@
 import '@testing-library/jest-dom/vitest'
 import { afterEach, beforeEach, vi } from 'vitest'
 
+// jsdom has no Canvas/DOMMatrix support at all; `pdfjs-dist` (via `react-pdf`) references
+// `DOMMatrix` at import time, which would otherwise throw for every test file that transitively
+// renders SourceDocumentPreview without itself mocking `react-pdf`
+// (021-sources-chunking-embeddings-refresh). A minimal stand-in is enough — no test in this
+// suite exercises pdfjs's real canvas rendering path.
+if (typeof globalThis.DOMMatrix === 'undefined') {
+  class MockDOMMatrix {
+    constructor(..._args: unknown[]) {}
+  }
+  // @ts-expect-error - test-only polyfill, not a full DOMMatrix implementation
+  globalThis.DOMMatrix = MockDOMMatrix
+}
+
 // Default fetch mock: routes by URL so every hook that fetches on mount
 // (useSourceDocuments, useSystemCapacity, CorpusContext) gets a sane
 // empty/ready response without a real network call, unless a test overrides

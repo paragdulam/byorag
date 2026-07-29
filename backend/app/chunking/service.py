@@ -1,3 +1,4 @@
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,13 +9,32 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.chunking import strategies  # noqa: F401  (registers "fixed-size" on import)
-from app.chunking.schemas import Chunk, ChunkingResult, ChunkRunResponse
+from app.chunking.schemas import (
+    Chunk,
+    ChunkingResult,
+    ChunkRange,
+    ChunkRunResponse,
+    PagePosition,
+    PreviewSegment,
+)
 from app.chunking.strategies.base import STRATEGIES
 from app.db.lookups import get_document_or_none
 from app.db.models import Chunk as ChunkRow
 from app.db.models import Document
 
 MAX_CHUNKS = 200
+
+
+class NoSavedChunksError(Exception):
+    def __init__(self, document_id: str) -> None:
+        self.document_id = document_id
+        super().__init__(f"No saved chunks for document '{document_id}'")
+
+
+class DocumentFileUnavailableError(Exception):
+    def __init__(self, document_id: str) -> None:
+        self.document_id = document_id
+        super().__init__(f"Stored file is missing or unreadable for document '{document_id}'")
 
 StreamEventType = Literal["progress", "result", "error"]
 StreamEvent = tuple[StreamEventType, dict[str, int] | dict[str, str] | ChunkRunResponse]
@@ -213,3 +233,128 @@ def save_chunks_stream(
             overlap=overlap,
         ),
     )
+
+
+def _compute_page_positions(page_texts: list[str], raw: str, full_text: str) -> list[PagePosition]:
+    """Maps each PDF page's extracted text to its character range within `full_text`
+    (023-pdf-fullscreen-chunk-view research.md §3). `raw` is `"\\n".join(page_texts)` — `full_text`
+    is `raw.strip()`. Page boundaries are first computed in `raw`'s offset space, then shifted by
+    however much `.strip()` removed from the start, clipped to `full_text`'s bounds (dropping any
+    page that collapses to zero width — e.g. a blank page), and finally re-stitched so surviving
+    pages fully partition `full_text` with no gaps (each surviving page's `end` extends to the next
+    surviving page's `start`, absorbing any joiner/dropped-page gap between them)."""
+    raw_positions: list[tuple[int, int, int]] = []
+    cursor = 0
+    for page_number, text in enumerate(page_texts, start=1):
+        start = cursor
+        end = start + len(text)
+        raw_positions.append((page_number, start, end))
+        cursor = end + 1  # +1 for the "\n" joiner before the next page
+
+    lstrip_len = len(raw) - len(raw.lstrip())
+    final_len = len(full_text)
+
+    survivors: list[tuple[int, int, int]] = []
+    for page_number, start, end in raw_positions:
+        shifted_start = max(0, min(start - lstrip_len, final_len))
+        shifted_end = max(0, min(end - lstrip_len, final_len))
+        if shifted_end > shifted_start:
+            survivors.append((page_number, shifted_start, shifted_end))
+
+    pages_out: list[PagePosition] = []
+    for i, (page_number, start, _end) in enumerate(survivors):
+        end = survivors[i + 1][1] if i + 1 < len(survivors) else final_len
+        pages_out.append(PagePosition(pageNumber=page_number, start=start, end=end))
+    return pages_out
+
+
+def compute_structured_preview(
+    db: Session, document: Document
+) -> tuple[str, list[PreviewSegment], list[PagePosition], list[ChunkRange]]:
+    """Recomputes, on demand, the document's structure-preserving extracted text plus a
+    character-offset segment map of which saved chunk (or chunk-overlap) owns each range —
+    for Chunked Preview v2's continuous, background-only-highlighted rendering
+    (022-chunk-preview-ui-fixes research.md §1–§2) — and, additionally, per-page character
+    boundaries and each saved chunk's own character range, letting a page-scoped "chunk in
+    context" view be sliced from this same payload without a second endpoint
+    (023-pdf-fullscreen-chunk-view research.md §2–§4). Nothing here is persisted: `chunk_size`,
+    `overlap`, and `strategy` are already saved per `Chunk` row (shared across a document's
+    whole current save), so the same windowing math the chunking strategy used can be re-run
+    against a position-tracked word tokenization of a fresh re-extraction, without needing to
+    store any new column.
+    """
+    saved_chunks = list_saved_chunks(db, document.id)
+    if not saved_chunks:
+        raise NoSavedChunksError(document.id)
+
+    total_pages, pages = extract_text_pages(Path(document.storage_path))
+    if total_pages == 0:
+        raise DocumentFileUnavailableError(document.id)
+
+    page_texts = list(pages)
+    raw = "\n".join(page_texts)
+    full_text = raw.strip()
+    pages_out = _compute_page_positions(page_texts, raw, full_text)
+
+    word_tokens = list(re.finditer(r"\S+", full_text))
+    n_words = len(word_tokens)
+
+    # For each word, the set of saved-chunk indexes whose window covers it — 2+ entries means
+    # an overlap span (research.md §2: ownership only ever resolves to "exactly one chunk" or
+    # "shared", regardless of how many chunks actually overlap there).
+    ownership: list[set[int]] = [set() for _ in range(n_words)]
+    chunk_ranges: list[ChunkRange] = []
+    for chunk in saved_chunks:
+        stride = chunk.chunk_size - chunk.overlap
+        start_word = chunk.index * stride
+        end_word = min(start_word + chunk.chunk_size, n_words)
+        clamped_start = max(start_word, 0)
+        for word_index in range(clamped_start, end_word):
+            ownership[word_index].add(chunk.index)
+        # Independent of the ownership merge above — a chunk's own true extent must stay
+        # recoverable even where it overlaps a neighbor (research.md §4).
+        if end_word > clamped_start:
+            chunk_ranges.append(
+                ChunkRange(
+                    chunkIndex=chunk.index,
+                    start=word_tokens[clamped_start].start(),
+                    end=word_tokens[end_word - 1].end(),
+                )
+            )
+
+    def _classify(owners: set[int]) -> tuple[Literal["chunk", "overlap"], int | None]:
+        if len(owners) > 1:
+            return "overlap", None
+        return "chunk", next(iter(owners))
+
+    # Segments must fully partition the covered range of `full_text` — including the
+    # inter-word whitespace between two chunks, which belongs to neither chunk's own word
+    # tokens but still has to render as part of the continuous flow. Each run's `end` is
+    # therefore the *next* word's start (absorbing the whitespace between them), not this
+    # run's own last word's end.
+    segments: list[PreviewSegment] = []
+    word_index = 0
+    while word_index < n_words:
+        owners = ownership[word_index]
+        if not owners:
+            word_index += 1
+            continue
+
+        kind, chunk_index = _classify(owners)
+        run_start_index = word_index
+        while (
+            word_index < n_words
+            and ownership[word_index]
+            and _classify(ownership[word_index]) == (kind, chunk_index)
+        ):
+            word_index += 1
+        # run covers word_tokens[run_start_index:word_index]
+
+        start_char = word_tokens[run_start_index].start()
+        end_char = word_tokens[word_index].start() if word_index < n_words else len(full_text)
+
+        segments.append(
+            PreviewSegment(start=start_char, end=end_char, kind=kind, chunkIndex=chunk_index)
+        )
+
+    return full_text, segments, pages_out, chunk_ranges

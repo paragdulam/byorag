@@ -34,6 +34,7 @@ function mockState(overrides: Partial<UseChunkEmbeddings> = {}): UseChunkEmbeddi
     documents: [makeDoc()],
     isLoadingDocuments: false,
     models: [{ id: 'bert', label: 'BERT (bert-base-uncased)' }],
+    activeModel: 'bert',
     savedChunks: [
       { id: 'chunk-1', index: 0, content: 'first chunk text' },
       { id: 'chunk-2', index: 1, content: 'second chunk text' },
@@ -49,7 +50,10 @@ function mockState(overrides: Partial<UseChunkEmbeddings> = {}): UseChunkEmbeddi
     hasSavedOnce: false,
     isEntireCorpus: false,
     batchProgress: null,
-    batchResults: [],
+    generateBatchResults: [],
+    saveBatchResults: [],
+    existingEmbeddingsSummary: [],
+    isLoadingExistingEmbeddings: false,
     ...overrides,
   }
   mockedUseChunkEmbeddings.mockReturnValue(state)
@@ -380,7 +384,7 @@ describe('EmbeddingsScreen — Entire Corpus (018-ui-polish-batch US2)', () => {
     mockState({
       generateStatus: 'success',
       isEntireCorpus: true,
-      batchResults: [
+      generateBatchResults: [
         {
           documentId: 'doc-a',
           documentName: 'a.pdf',
@@ -405,11 +409,129 @@ describe('EmbeddingsScreen — Entire Corpus (018-ui-polish-batch US2)', () => {
     expect(within(summary).getByText(/failed to generate embeddings/i)).toBeInTheDocument()
   })
 
+  it('shows the correct saved counts (not 0) in the per-document summary after an Entire Corpus save completes', () => {
+    mockState({
+      generateStatus: 'success',
+      saveStatus: 'success',
+      isEntireCorpus: true,
+      generateBatchResults: [
+        {
+          documentId: 'doc-a',
+          documentName: 'a.pdf',
+          status: 'success',
+          result: { documentId: 'doc-a', model: 'bert', vectors: [{ chunkId: 'c1', model: 'bert', dims: 768, vector: [] }] },
+        },
+      ],
+      saveBatchResults: [
+        {
+          documentId: 'doc-a',
+          documentName: 'a.pdf',
+          status: 'success',
+          result: { documentId: 'doc-a', model: 'bert', savedCount: 4 },
+        },
+        {
+          documentId: 'doc-b',
+          documentName: 'b.pdf',
+          status: 'failed',
+          errorMessage: 'Failed to save embeddings',
+        },
+      ],
+    })
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} />)
+
+    const summary = screen.getByTestId('entire-corpus-summary')
+    // The regression this guards: the summary must read the save result's `savedCount`, not the
+    // unrelated `vectors` field from a generate result — which previously always showed 0.
+    expect(within(summary).getByText(/4 embeddings saved/i)).toBeInTheDocument()
+    expect(within(summary).queryByText(/0 embeddings/i)).not.toBeInTheDocument()
+    expect(within(summary).getByText(/failed to save embeddings/i)).toBeInTheDocument()
+  })
+
   it('enables Save once an Entire Corpus generate has succeeded', () => {
     mockState({ generateStatus: 'success', isEntireCorpus: true, preview: null })
 
     render(<EmbeddingsScreen onNavigate={vi.fn()} />)
 
     expect(screen.getByRole('button', { name: /^save$/i })).toBeEnabled()
+  })
+})
+
+describe('EmbeddingsScreen — existing saved embeddings (adjacent fix, post-021-sources-chunking-embeddings-refresh)', () => {
+  it('shows the shared already-done indicator for the selected document, before any action this session', () => {
+    mockState({
+      existingEmbeddingsSummary: [
+        { documentId: 'report.pdf', documentName: 'report.pdf', existingCount: 2, totalChunks: 2 },
+      ],
+    })
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} />)
+
+    const indicator = screen.getByTestId('already-done-indicator')
+    expect(indicator).toHaveTextContent(/embedding generation already performed for this document/i)
+  })
+
+  it('shows the shared already-done indicator under Entire Corpus scope when any document already has embeddings', () => {
+    mockState({
+      isEntireCorpus: true,
+      existingEmbeddingsSummary: [
+        { documentId: 'doc-a', documentName: 'a.pdf', existingCount: 1, totalChunks: 2 },
+        { documentId: 'doc-b', documentName: 'b.pdf', existingCount: 0, totalChunks: 2 },
+      ],
+    })
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} />)
+
+    const indicator = screen.getByTestId('already-done-indicator')
+    expect(indicator).toHaveTextContent(/embedding generation already performed for this corpus/i)
+  })
+
+  it('does not show the already-done indicator once a fresh generate/save has happened this session', () => {
+    mockState({
+      existingEmbeddingsSummary: [
+        { documentId: 'report.pdf', documentName: 'report.pdf', existingCount: 2, totalChunks: 2 },
+      ],
+      generateStatus: 'success',
+      generateBatchResults: [
+        {
+          documentId: 'report.pdf',
+          documentName: 'report.pdf',
+          status: 'success',
+          result: { documentId: 'report.pdf', model: 'bert', vectors: [] },
+        },
+      ],
+      isEntireCorpus: true,
+    })
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} />)
+
+    expect(screen.queryByTestId('already-done-indicator')).not.toBeInTheDocument()
+  })
+
+  it('does not show the already-done indicator when nothing already exists', () => {
+    mockState({ existingEmbeddingsSummary: [] })
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} />)
+
+    expect(screen.queryByTestId('already-done-indicator')).not.toBeInTheDocument()
+  })
+
+  it('does not fall back to the single-document "no saved chunks" message under Entire Corpus scope', () => {
+    // Regression: this document/single-doc-scoped fallback (savedChunks/preview) rendered
+    // unconditionally whenever neither batch-results array had data yet, including under Entire
+    // Corpus scope before any fresh run this session — showing a confusing "No saved chunks for
+    // this document yet" message alongside the correct per-corpus already-done indicator.
+    mockState({
+      isEntireCorpus: true,
+      existingEmbeddingsSummary: [
+        { documentId: 'doc-a', documentName: 'a.pdf', existingCount: 1, totalChunks: 2 },
+      ],
+      savedChunks: [],
+    })
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByTestId('already-done-indicator')).toBeInTheDocument()
+    expect(screen.queryByText(/no saved chunks for this document yet/i)).not.toBeInTheDocument()
   })
 })
