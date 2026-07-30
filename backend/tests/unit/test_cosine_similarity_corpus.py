@@ -16,7 +16,7 @@ def _make_corpus(db_session: Session, name: str = "corpus") -> Corpus:
 
 def _make_document_in_corpus(db_session: Session, corpus: Corpus, name: str) -> Document:
     document = Document(
-        name=name, content_hash=f"hash-{name}-{id(name)}", storage_path="/tmp/x.pdf",
+        name=name, content_hash=f"hash-{name}-{id(name)}", content=b"x",
         size_bytes=10, status="processed",
     )
     db_session.add(document)

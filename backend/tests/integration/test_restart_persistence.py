@@ -1,24 +1,44 @@
+import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app.auth import service as auth_service
 from app.config import settings
 from app.db.base import SessionLocal
 from app.db.models import Chunk, Corpus, Document, DocumentCorpus
+from app.db.models import User
 from app.main import app
 from tests.pdf_helpers import make_words_pdf
 
 
 @pytest.fixture
-def real_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def real_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     """Unlike the `client` fixture, this does NOT override `get_db` with a
     rolled-back session — every write here is a real, durable commit against
     `DATABASE_URL`, matching what the running app actually does. The test
-    cleans up its own rows at the end."""
+    cleans up its own rows at the end. Also creates (and cleans up) a real,
+    durably-committed user so requests carry a valid `Authorization` header,
+    same as any other authenticated caller (024-user-authentication)."""
     monkeypatch.setattr(settings, "pdfs_dir", tmp_path)
-    return TestClient(app)
+    with SessionLocal() as setup_session:
+        user = auth_service.create_user(
+            setup_session, f"real-client-{uuid.uuid4().hex}@example.com", "hunter22"
+        )
+        token = auth_service.create_session(setup_session, user.id)
+        user_id = user.id
+
+    test_client = TestClient(app)
+    test_client.headers["Authorization"] = f"Bearer {token}"
+    try:
+        yield test_client
+    finally:
+        with SessionLocal() as cleanup_session:
+            cleanup_session.execute(User.__table__.delete().where(User.id == user_id))
+            cleanup_session.commit()
 
 
 def test_data_survives_independent_of_the_request_session(real_client: TestClient) -> None:

@@ -1,10 +1,8 @@
-from pathlib import Path
-
 from fastapi.testclient import TestClient
 
 
 def test_mixed_valid_and_invalid_batch_only_saves_the_valid_file(
-    client: TestClient, pdfs_dir: Path, corpus_id: str
+    client: TestClient, corpus_id: str
 ) -> None:
     response = client.post(
         "/api/sources",
@@ -19,9 +17,6 @@ def test_mixed_valid_and_invalid_batch_only_saves_the_valid_file(
     body = response.json()
     assert [doc["name"] for doc in body["documents"]] == ["good.pdf"]
     assert body["rejections"] == [{"fileName": "notes.txt", "reason": "invalid-type"}]
-
-    assert (pdfs_dir / "good.pdf").exists()
-    assert not (pdfs_dir / "notes.txt").exists()
 
     list_body = client.get("/api/sources", params={"corpusId": corpus_id}).json()
     assert [doc["name"] for doc in list_body["documents"]] == ["good.pdf"]

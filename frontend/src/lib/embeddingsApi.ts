@@ -1,3 +1,4 @@
+import { apiFetch, appendTokenQueryParam } from './apiClient'
 import type {
   EmbeddingGenerateResult,
   EmbeddingModelOption,
@@ -20,7 +21,7 @@ const EMBEDDINGS_PROJECT_ENDPOINT = `${API_BASE_URL}/api/embeddings/project`
  * — server-driven, not hardcoded, so the dropdown can grow without a frontend redesign.
  */
 export async function listEmbeddingModels(): Promise<EmbeddingModelOption[]> {
-  const response = await fetch(EMBEDDINGS_MODELS_ENDPOINT)
+  const response = await apiFetch(EMBEDDINGS_MODELS_ENDPOINT)
 
   if (!response.ok) {
     throw new Error(`Failed to load embedding models: ${response.status}`)
@@ -46,7 +47,7 @@ export function generateEmbeddingsStream(
   { onProgress, onResult, onError }: EmbeddingsStreamHandlers,
 ): () => void {
   const url = `${EMBEDDINGS_GENERATE_ENDPOINT}?documentId=${encodeURIComponent(documentId)}&model=${encodeURIComponent(model)}`
-  const source = new EventSource(url)
+  const source = new EventSource(appendTokenQueryParam(url))
 
   source.addEventListener('progress', (event) => {
     const data = JSON.parse((event as MessageEvent).data) as { percent: number }
@@ -88,7 +89,7 @@ export function saveEmbeddingsStream(
   { onProgress, onResult, onError }: EmbeddingsSaveStreamHandlers,
 ): () => void {
   const url = `${EMBEDDINGS_SAVE_ENDPOINT}?documentId=${encodeURIComponent(documentId)}&model=${encodeURIComponent(model)}`
-  const source = new EventSource(url)
+  const source = new EventSource(appendTokenQueryParam(url))
 
   source.addEventListener('progress', (event) => {
     const data = JSON.parse((event as MessageEvent).data) as { percent: number }
@@ -120,7 +121,7 @@ export function saveEmbeddingsStream(
  */
 export async function listSavedEmbeddings(chunkId: string): Promise<SavedEmbedding[]> {
   const url = `${EMBEDDINGS_SAVED_ENDPOINT}?chunkId=${encodeURIComponent(chunkId)}`
-  const response = await fetch(url)
+  const response = await apiFetch(url)
 
   if (!response.ok) {
     throw new Error(`Failed to load saved embeddings: ${response.status}`)
@@ -136,7 +137,7 @@ export async function listSavedEmbeddings(chunkId: string): Promise<SavedEmbeddi
  * entries with `available: true` do anything; others are visible placeholders.
  */
 export async function listProjectionMethods(): Promise<ProjectionMethodOption[]> {
-  const response = await fetch(EMBEDDINGS_PROJECTION_METHODS_ENDPOINT)
+  const response = await apiFetch(EMBEDDINGS_PROJECTION_METHODS_ENDPOINT)
 
   if (!response.ok) {
     throw new Error(`Failed to load projection methods: ${response.status}`)
@@ -163,7 +164,7 @@ export async function fetchProjection(
   method: string,
   entries: ProjectionEntryInput[],
 ): Promise<ProjectionPoint[]> {
-  const response = await fetch(EMBEDDINGS_PROJECT_ENDPOINT, {
+  const response = await apiFetch(EMBEDDINGS_PROJECT_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ method, entries }),

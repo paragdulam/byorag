@@ -3,11 +3,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.auth.router import router as auth_router
 from app.chunking.router import router as chunking_router
 from app.config import ensure_pdfs_dir, settings
 from app.corpora.router import router as corpora_router
 from app.db.base import Base, SessionLocal, check_database_connection, engine, ensure_vector_extension
 from app.db.legacy_migration import migrate_legacy_pdfs
+from app.db.schema_migrations import ensure_schema_migrations
 from app.embeddings.router import router as embeddings_router
 from app.metrics.router import router as metrics_router
 from app.playground.router import router as playground_router
@@ -21,6 +23,7 @@ async def lifespan(app: FastAPI):
 
     check_database_connection(engine)
     ensure_vector_extension(engine)
+    ensure_schema_migrations(engine)
     Base.metadata.create_all(engine)
 
     with SessionLocal() as db:
@@ -38,6 +41,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(corpora_router)
 app.include_router(sources_router)
 app.include_router(system_router)

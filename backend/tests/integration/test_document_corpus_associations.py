@@ -28,7 +28,12 @@ def test_dedup_attach_unlink_survives_then_deletes_on_last_unlink(
     # no duplicate document/chunk rows (FR-005, FR-006, SC-004).
     dedup_id = upload_pdf(client, corpus_b, "shared-copy.pdf", content)
     assert dedup_id == document_id
-    assert db_session.execute(select(Document)).scalars().all().__len__() == 1
+    # Scoped to this document's own content hash, not a global count — the shared dev
+    # database this suite runs against holds other real documents too.
+    matching = db_session.execute(
+        select(Document).where(Document.id == document_id)
+    ).scalars().all()
+    assert len(matching) == 1
 
     # Simulate a persisted chunk for this document (chunk persistence itself
     # lands in User Story 3; here we only verify the cascade-delete behavior

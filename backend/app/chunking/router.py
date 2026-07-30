@@ -4,10 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import require_user
 from app.chunking import service
 from app.chunking.schemas import SavedChunk, SavedChunksResponse, StructuredPreviewResponse
 from app.db.base import get_db
-from app.db.lookups import get_document_or_none
+from app.db.lookups import get_document_owned_by
+from app.db.models import User
 
 router = APIRouter(prefix="/api/chunking", tags=["chunking"])
 
@@ -18,11 +20,20 @@ STRATEGY = "fixed-size"
 
 @router.get("/run/stream")
 def run_chunking_stream(
-    documentId: str, chunkSize: int, overlap: int = 0, db: Session = Depends(get_db)
+    documentId: str,
+    chunkSize: int,
+    overlap: int = 0,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> StreamingResponse:
     try:
         document = service.resolve_run(
-            db, document_id=documentId, chunk_size=chunkSize, strategy=STRATEGY, overlap=overlap
+            db,
+            user.id,
+            document_id=documentId,
+            chunk_size=chunkSize,
+            strategy=STRATEGY,
+            overlap=overlap,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -44,11 +55,20 @@ def run_chunking_stream(
 
 @router.get("/save/stream")
 def save_chunking_stream(
-    documentId: str, chunkSize: int, overlap: int = 0, db: Session = Depends(get_db)
+    documentId: str,
+    chunkSize: int,
+    overlap: int = 0,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> StreamingResponse:
     try:
         document = service.resolve_run(
-            db, document_id=documentId, chunk_size=chunkSize, strategy=STRATEGY, overlap=overlap
+            db,
+            user.id,
+            document_id=documentId,
+            chunk_size=chunkSize,
+            strategy=STRATEGY,
+            overlap=overlap,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -69,8 +89,10 @@ def save_chunking_stream(
 
 
 @router.get("/saved-chunks")
-def get_saved_chunks(documentId: str, db: Session = Depends(get_db)) -> SavedChunksResponse:
-    if get_document_or_none(db, documentId) is None:
+def get_saved_chunks(
+    documentId: str, db: Session = Depends(get_db), user: User = Depends(require_user)
+) -> SavedChunksResponse:
+    if get_document_owned_by(db, documentId, user.id) is None:
         raise HTTPException(status_code=404, detail=f"No document found with id {documentId!r}")
 
     chunks = service.list_saved_chunks(db, documentId)
@@ -81,9 +103,9 @@ def get_saved_chunks(documentId: str, db: Session = Depends(get_db)) -> SavedChu
 
 @router.get("/structured-preview")
 def get_structured_preview(
-    documentId: str, db: Session = Depends(get_db)
+    documentId: str, db: Session = Depends(get_db), user: User = Depends(require_user)
 ) -> StructuredPreviewResponse:
-    document = get_document_or_none(db, documentId)
+    document = get_document_owned_by(db, documentId, user.id)
     if document is None:
         raise HTTPException(status_code=404, detail=f"No document found with id {documentId!r}")
 

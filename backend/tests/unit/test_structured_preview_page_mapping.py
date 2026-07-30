@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from sqlalchemy.orm import Session
 
 from app.chunking import service
@@ -9,13 +7,11 @@ from app.db.models import Document
 from tests.pdf_helpers import make_multi_page_words_pdf, make_words_pdf
 
 
-def _make_document(db_session: Session, tmp_path: Path, filename: str, content: bytes) -> Document:
-    path = tmp_path / filename
-    path.write_bytes(content)
+def _make_document(db_session: Session, filename: str, content: bytes) -> Document:
     document = Document(
         name=filename,
         content_hash=compute_content_hash(content),
-        storage_path=str(path),
+        content=content,
         size_bytes=len(content),
         status="processed",
     )
@@ -36,9 +32,9 @@ def _save_chunks(
 
 class TestPageBoundaries:
     def test_single_page_document_produces_one_page_spanning_full_text(
-        self, db_session: Session, tmp_path: Path
+        self, db_session: Session
     ) -> None:
-        document = _make_document(db_session, tmp_path, "one-page.pdf", make_words_pdf(20))
+        document = _make_document(db_session, "one-page.pdf", make_words_pdf(20))
         _save_chunks(db_session, document, chunk_size=5)
 
         full_text, _segments, pages, _chunk_ranges = service.compute_structured_preview(
@@ -51,10 +47,10 @@ class TestPageBoundaries:
         assert pages[0].end == len(full_text)
 
     def test_multi_page_document_pages_are_contiguous_with_no_gaps(
-        self, db_session: Session, tmp_path: Path
+        self, db_session: Session
     ) -> None:
         document = _make_document(
-            db_session, tmp_path, "multi-page.pdf", make_multi_page_words_pdf([10, 15, 8])
+            db_session, "multi-page.pdf", make_multi_page_words_pdf([10, 15, 8])
         )
         _save_chunks(db_session, document, chunk_size=6)
 
@@ -69,13 +65,13 @@ class TestPageBoundaries:
         assert pages[-1].end == len(full_text)
 
     def test_blank_leading_page_is_shifted_off_and_omitted_with_no_gap(
-        self, db_session: Session, tmp_path: Path
+        self, db_session: Session
     ) -> None:
         # A blank first page ("") contributes nothing; its leading newline joiner gets consumed
         # entirely by fullText's own .strip() (research.md §3) — the surviving page must still
         # start at 0 and there must be no gap where the blank page used to be.
         document = _make_document(
-            db_session, tmp_path, "blank-leading.pdf", make_multi_page_words_pdf([0, 10, 10])
+            db_session, "blank-leading.pdf", make_multi_page_words_pdf([0, 10, 10])
         )
         _save_chunks(db_session, document, chunk_size=6)
 
@@ -90,10 +86,10 @@ class TestPageBoundaries:
         assert pages[-1].end == len(full_text)
 
     def test_blank_middle_page_is_omitted_and_its_gap_absorbed_by_the_preceding_page(
-        self, db_session: Session, tmp_path: Path
+        self, db_session: Session
     ) -> None:
         document = _make_document(
-            db_session, tmp_path, "blank-middle.pdf", make_multi_page_words_pdf([10, 0, 10])
+            db_session, "blank-middle.pdf", make_multi_page_words_pdf([10, 0, 10])
         )
         _save_chunks(db_session, document, chunk_size=6)
 
@@ -111,9 +107,9 @@ class TestPageBoundaries:
 
 class TestChunkRanges:
     def test_chunk_range_matches_the_word_window_formula(
-        self, db_session: Session, tmp_path: Path
+        self, db_session: Session
     ) -> None:
-        document = _make_document(db_session, tmp_path, "chunks.pdf", make_words_pdf(20))
+        document = _make_document(db_session, "chunks.pdf", make_words_pdf(20))
         _save_chunks(db_session, document, chunk_size=5, overlap=0)
 
         full_text, _segments, _pages, chunk_ranges = service.compute_structured_preview(
@@ -125,9 +121,9 @@ class TestChunkRanges:
             assert 0 <= chunk_range.start < chunk_range.end <= len(full_text)
 
     def test_chunk_range_recoverable_independent_of_overlap_collapsing(
-        self, db_session: Session, tmp_path: Path
+        self, db_session: Session
     ) -> None:
-        document = _make_document(db_session, tmp_path, "overlap.pdf", make_words_pdf(20))
+        document = _make_document(db_session, "overlap.pdf", make_words_pdf(20))
         _save_chunks(db_session, document, chunk_size=6, overlap=3)
 
         _full_text, segments, _pages, chunk_ranges = service.compute_structured_preview(
@@ -142,11 +138,11 @@ class TestChunkRanges:
         assert by_index[1].start < by_index[0].end  # genuine character-range overlap
 
     def test_out_of_bounds_chunk_is_omitted_from_chunk_ranges(
-        self, db_session: Session, tmp_path: Path
+        self, db_session: Session
     ) -> None:
         # A chunk row whose index * stride already exceeds the document's word count (e.g. left
         # over from a since-shrunk document) must not produce a nonsensical/empty range.
-        document = _make_document(db_session, tmp_path, "short.pdf", make_words_pdf(5))
+        document = _make_document(db_session, "short.pdf", make_words_pdf(5))
         db_session.add(
             ChunkRow(
                 document_id=document.id,

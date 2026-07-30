@@ -1,22 +1,30 @@
+import pytest
 from sqlalchemy.orm import Session
 
+from app.auth import service as auth_service
 from app.corpora import service as corpora_service
 from app.db.models import Document, DocumentCorpus
 from app.sources import service
 
 
-def test_list_documents_empty_corpus(db_session: Session) -> None:
-    corpus = corpora_service.create_corpus(db_session, "Empty")
+@pytest.fixture
+def user_id(db_session: Session) -> str:
+    return auth_service.create_user(db_session, "listing-owner@example.com", "hunter22").id
+
+
+def test_list_documents_empty_corpus(db_session: Session, user_id: str) -> None:
+    corpus = corpora_service.create_corpus(db_session, user_id, "Empty")
 
     assert service.list_documents(db_session, corpus.id) == []
 
 
-def test_list_documents_returns_linked_document(db_session: Session) -> None:
-    corpus = corpora_service.create_corpus(db_session, "Has One")
+def test_list_documents_returns_linked_document(db_session: Session, user_id: str) -> None:
+    corpus = corpora_service.create_corpus(db_session, user_id, "Has One")
     document = Document(
+        user_id=user_id,
         name="report.pdf",
         content_hash="c" * 64,
-        storage_path="/tmp/report.pdf",
+        content=b"x",
         size_bytes=42,
         status="processed",
     )
@@ -34,13 +42,14 @@ def test_list_documents_returns_linked_document(db_session: Session) -> None:
     assert documents[0].status == "processed"
 
 
-def test_list_documents_sorted_by_uploaded_at_ascending(db_session: Session) -> None:
-    corpus = corpora_service.create_corpus(db_session, "Sorted")
+def test_list_documents_sorted_by_uploaded_at_ascending(db_session: Session, user_id: str) -> None:
+    corpus = corpora_service.create_corpus(db_session, user_id, "Sorted")
     for name in ["first.pdf", "second.pdf"]:
         document = Document(
+            user_id=user_id,
             name=name,
             content_hash=f"{name}-hash".ljust(64, "0"),
-            storage_path=f"/tmp/{name}",
+            content=b"x",
             size_bytes=1,
             status="processed",
         )
@@ -54,13 +63,14 @@ def test_list_documents_sorted_by_uploaded_at_ascending(db_session: Session) -> 
     assert [d.name for d in documents] == ["first.pdf", "second.pdf"]
 
 
-def test_list_documents_excludes_other_corpora(db_session: Session) -> None:
-    corpus_a = corpora_service.create_corpus(db_session, "A")
-    corpus_b = corpora_service.create_corpus(db_session, "B")
+def test_list_documents_excludes_other_corpora(db_session: Session, user_id: str) -> None:
+    corpus_a = corpora_service.create_corpus(db_session, user_id, "A")
+    corpus_b = corpora_service.create_corpus(db_session, user_id, "B")
     document = Document(
+        user_id=user_id,
         name="only-a.pdf",
         content_hash="d" * 64,
-        storage_path="/tmp/only-a.pdf",
+        content=b"x",
         size_bytes=1,
         status="processed",
     )

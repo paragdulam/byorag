@@ -1,9 +1,8 @@
-from pathlib import Path
-
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import service as auth_service
 from app.chunking import service as chunking_service
 from app.db.hashing import compute_content_hash
 from app.db.models import Chunk as ChunkRow
@@ -13,16 +12,20 @@ from app.embeddings import service as embeddings_service
 from tests.pdf_helpers import make_words_pdf
 
 
+@pytest.fixture
+def user_id(db_session: Session) -> str:
+    return auth_service.create_user(db_session, "embeddings-owner@example.com", "hunter22").id
+
+
 def _make_saved_chunks(
-    db_session: Session, tmp_path: Path, filename: str, word_count: int, chunk_size: int
+    db_session: Session, user_id: str, filename: str, word_count: int, chunk_size: int
 ) -> Document:
     content = make_words_pdf(word_count)
-    path = tmp_path / filename
-    path.write_bytes(content)
     document = Document(
+        user_id=user_id,
         name=filename,
         content_hash=compute_content_hash(content),
-        storage_path=str(path),
+        content=content,
         size_bytes=len(content),
         status="processed",
     )
@@ -31,7 +34,7 @@ def _make_saved_chunks(
     db_session.refresh(document)
 
     resolved = chunking_service.resolve_run(
-        db_session, document_id=document.id, chunk_size=chunk_size, strategy="fixed-size"
+        db_session, user_id, document_id=document.id, chunk_size=chunk_size, strategy="fixed-size"
     )
     list(chunking_service.save_chunks_stream(db_session, resolved, chunk_size, "fixed-size"))
     db_session.refresh(document)
@@ -39,33 +42,32 @@ def _make_saved_chunks(
 
 
 def test_resolve_embedding_run_unregistered_model_raises_value_error(
-    db_session: Session, tmp_path: Path
+    db_session: Session, user_id: str
 ) -> None:
-    document = _make_saved_chunks(db_session, tmp_path, "report.pdf", 10, 5)
+    document = _make_saved_chunks(db_session, user_id, "report.pdf", 10, 5)
 
     with pytest.raises(ValueError):
-        embeddings_service.resolve_embedding_run(db_session, document.id, "not-a-model")
+        embeddings_service.resolve_embedding_run(db_session, user_id, document.id, "not-a-model")
 
 
 def test_resolve_embedding_run_unknown_document_raises_file_not_found(
-    db_session: Session,
+    db_session: Session, user_id: str,
 ) -> None:
     with pytest.raises(FileNotFoundError):
         embeddings_service.resolve_embedding_run(
-            db_session, "00000000-0000-0000-0000-000000000000", "bert"
+            db_session, user_id, "00000000-0000-0000-0000-000000000000", "bert"
         )
 
 
 def test_resolve_embedding_run_no_saved_chunks_raises_value_error(
-    db_session: Session, tmp_path: Path
+    db_session: Session, user_id: str
 ) -> None:
     content = make_words_pdf(10)
-    path = tmp_path / "report.pdf"
-    path.write_bytes(content)
     document = Document(
+        user_id=user_id,
         name="report.pdf",
         content_hash=compute_content_hash(content),
-        storage_path=str(path),
+        content=content,
         size_bytes=len(content),
         status="processed",
     )
@@ -74,11 +76,11 @@ def test_resolve_embedding_run_no_saved_chunks_raises_value_error(
     db_session.refresh(document)
 
     with pytest.raises(ValueError):
-        embeddings_service.resolve_embedding_run(db_session, document.id, "bert")
+        embeddings_service.resolve_embedding_run(db_session, user_id, document.id, "bert")
 
 
-def test_stream_generate_never_persists(db_session: Session, tmp_path: Path) -> None:
-    document = _make_saved_chunks(db_session, tmp_path, "report.pdf", 10, 5)
+def test_stream_generate_never_persists(db_session: Session, user_id: str) -> None:
+    document = _make_saved_chunks(db_session, user_id, "report.pdf", 10, 5)
     chunks = chunking_service.list_saved_chunks(db_session, document.id)
 
     events = list(embeddings_service.stream_generate(chunks, "bert"))
@@ -98,9 +100,9 @@ def test_stream_generate_never_persists(db_session: Session, tmp_path: Path) -> 
 
 
 def test_stream_generate_emits_progress_for_each_chunk(
-    db_session: Session, tmp_path: Path
+    db_session: Session, user_id: str
 ) -> None:
-    document = _make_saved_chunks(db_session, tmp_path, "report.pdf", 10, 5)
+    document = _make_saved_chunks(db_session, user_id, "report.pdf", 10, 5)
     chunks = chunking_service.list_saved_chunks(db_session, document.id)
 
     events = list(embeddings_service.stream_generate(chunks, "bert"))
@@ -111,9 +113,9 @@ def test_stream_generate_emits_progress_for_each_chunk(
 
 
 def test_save_embeddings_persists_one_row_per_chunk_tagged_with_model(
-    db_session: Session, tmp_path: Path
+    db_session: Session, user_id: str
 ) -> None:
-    document = _make_saved_chunks(db_session, tmp_path, "report.pdf", 10, 5)
+    document = _make_saved_chunks(db_session, user_id, "report.pdf", 10, 5)
     chunks = chunking_service.list_saved_chunks(db_session, document.id)
 
     events = list(embeddings_service.save_embeddings(db_session, chunks, "bert"))
@@ -134,9 +136,9 @@ def test_save_embeddings_persists_one_row_per_chunk_tagged_with_model(
 
 
 def test_save_embeddings_second_call_adds_rows_rather_than_replacing(
-    db_session: Session, tmp_path: Path
+    db_session: Session, user_id: str
 ) -> None:
-    document = _make_saved_chunks(db_session, tmp_path, "report.pdf", 10, 5)
+    document = _make_saved_chunks(db_session, user_id, "report.pdf", 10, 5)
     chunks = chunking_service.list_saved_chunks(db_session, document.id)
 
     list(embeddings_service.save_embeddings(db_session, chunks, "bert"))
@@ -152,8 +154,8 @@ def test_save_embeddings_second_call_adds_rows_rather_than_replacing(
     assert len(rows) == 2 * len(chunks)
 
 
-def test_list_saved_embeddings_orders_newest_first(db_session: Session, tmp_path: Path) -> None:
-    document = _make_saved_chunks(db_session, tmp_path, "report.pdf", 10, 5)
+def test_list_saved_embeddings_orders_newest_first(db_session: Session, user_id: str) -> None:
+    document = _make_saved_chunks(db_session, user_id, "report.pdf", 10, 5)
     chunks = chunking_service.list_saved_chunks(db_session, document.id)
 
     list(embeddings_service.save_embeddings(db_session, chunks, "bert"))
@@ -167,9 +169,9 @@ def test_list_saved_embeddings_orders_newest_first(db_session: Session, tmp_path
 
 
 def test_list_saved_embeddings_empty_for_chunk_with_none(
-    db_session: Session, tmp_path: Path
+    db_session: Session, user_id: str
 ) -> None:
-    document = _make_saved_chunks(db_session, tmp_path, "report.pdf", 10, 5)
+    document = _make_saved_chunks(db_session, user_id, "report.pdf", 10, 5)
     chunks = chunking_service.list_saved_chunks(db_session, document.id)
 
     saved = embeddings_service.list_saved_embeddings(db_session, chunks[0].id)

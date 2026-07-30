@@ -11,7 +11,7 @@ def _make_document(db_session: Session, name: str = "doc.pdf") -> Document:
     document = Document(
         name=name,
         content_hash=f"hash-{name}-{id(name)}",
-        storage_path="/tmp/does-not-matter.pdf",
+        content=b"x",
         size_bytes=10,
         status="processed",
     )

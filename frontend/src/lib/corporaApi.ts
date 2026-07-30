@@ -1,3 +1,4 @@
+import { apiFetch } from './apiClient'
 import type { Corpus } from '../types/corpus'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
@@ -40,7 +41,7 @@ async function parseErrorDetail(response: Response, fallback: string): Promise<s
 }
 
 export async function listCorpora(): Promise<Corpus[]> {
-  const response = await fetch(CORPORA_ENDPOINT)
+  const response = await apiFetch(CORPORA_ENDPOINT)
   if (!response.ok) {
     throw new CorpusApiError(`Failed to load corpora: ${response.status}`, response.status)
   }
@@ -49,7 +50,7 @@ export async function listCorpora(): Promise<Corpus[]> {
 }
 
 export async function createCorpus(name: string): Promise<Corpus> {
-  const response = await fetch(CORPORA_ENDPOINT, {
+  const response = await apiFetch(CORPORA_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
@@ -64,7 +65,7 @@ export async function createCorpus(name: string): Promise<Corpus> {
 }
 
 export async function renameCorpus(id: string, name: string): Promise<Corpus> {
-  const response = await fetch(`${CORPORA_ENDPOINT}/${encodeURIComponent(id)}`, {
+  const response = await apiFetch(`${CORPORA_ENDPOINT}/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
@@ -79,7 +80,7 @@ export async function renameCorpus(id: string, name: string): Promise<Corpus> {
 }
 
 export async function deleteCorpus(id: string): Promise<void> {
-  const response = await fetch(`${CORPORA_ENDPOINT}/${encodeURIComponent(id)}`, {
+  const response = await apiFetch(`${CORPORA_ENDPOINT}/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   })
   if (!response.ok) {

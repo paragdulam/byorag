@@ -35,7 +35,7 @@ def test_delete_blocked_while_corpus_has_documents(client: TestClient, db_sessio
     document = Document(
         name="a.pdf",
         content_hash="a" * 64,
-        storage_path="/tmp/a.pdf",
+        content=b"x",
         size_bytes=10,
         status="processed",
     )
@@ -57,7 +57,7 @@ def test_switching_active_corpus_scopes_sources(client: TestClient, db_session: 
     document = Document(
         name="only-in-a.pdf",
         content_hash="b" * 64,
-        storage_path="/tmp/only-in-a.pdf",
+        content=b"x",
         size_bytes=5,
         status="processed",
     )

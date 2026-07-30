@@ -1,27 +1,40 @@
 <!--
 Sync Impact Report
 ==================
-Version change: 1.0.0 → 1.1.0
+Version change: 2.0.0 → 3.0.0
 
 Modified principles:
-- IV. Fixed Technology Stack — expanded to add PostgreSQL as a fixed relational-database
-  component (alongside the existing Qdrant vector store), used for structured metadata
-  (corpora, documents, document-corpus associations, chunks). Qdrant itself was already
-  part of the stack — no change there. This is additive (a new stack element), not a
-  redefinition or removal of any existing choice, hence MINOR rather than MAJOR.
+- IV. Fixed Technology Stack — Source Storage REPLACED, not expanded: PDF content moves
+  from the local filesystem to PostgreSQL (associated with its owning document/corpus),
+  per 024-user-authentication User Story 3. This is a redefinition/removal of an existing
+  fixed-stack choice (local filesystem storage for PDFs no longer applies), not an
+  additive change, hence MAJOR per this constitution's own Governance rules — the same
+  category as the 2.0.0 Principle III change earlier today.
 
-Added sections: None (existing "Technology Stack & Environment" section gained one bullet)
+  (Carried over from the 1.1.0 → 2.0.0 amendment done earlier in this session: III. Single-
+  User Simplicity (YAGNI) → III. Multi-User Simplicity (Right-Sized Complexity) — the
+  prior prohibition on multi-tenant support/authentication was replaced with a requirement
+  to support it, per 024-user-authentication.)
+
+Added sections: None
 
 Removed sections: None
 
-Templates requiring updates:
-- ✅ .specify/templates/plan-template.md — reviewed; Storage field in Technical Context is a
-  generic example placeholder, no edit needed
-- ✅ .specify/templates/spec-template.md — no constitution-specific references to update
-- ✅ .specify/templates/tasks-template.md — no constitution-specific references to update
+Templates/docs requiring updates:
+- ✅ .specify/memory/constitution.md — Principle IV's Source Storage bullet and rationale
+  updated; Technology Stack & Environment's Relational Database and Source Storage bullets
+  rewritten to reflect PDF bytes now living in PostgreSQL
+- ✅ README.md — Tech stack table's "Data" row and the "Source Storage" env-var/behavior
+  description updated to reflect database-backed PDF storage
+- ✅ .specify/templates/plan-template.md — reviewed; Constitution Check section has no
+  hardcoded principle names, no edit needed
+- ✅ .specify/templates/spec-template.md — reviewed; no constitution-specific references
+- ✅ .specify/templates/tasks-template.md — reviewed; only references Principle II by name,
+  unaffected by this change
 - ✅ .specify/templates/checklist-template.md — reviewed, generic, no changes needed
 
-Follow-up TODOs: None
+Follow-up TODOs: None — both constitution conflicts flagged by 024-user-authentication
+(Principle III and the Source Storage rule) are now resolved.
 -->
 
 # byorag Constitution
@@ -60,18 +73,30 @@ are trustworthy. Without test coverage at every level, regressions in
 chunking, embedding, or retrieval logic can silently invalidate experiment
 comparisons.
 
-### III. Single-User Simplicity (YAGNI)
+### III. Multi-User Simplicity (Right-Sized Complexity)
 
-The current scope is a single local user managing sources on the local
-filesystem. The system MUST NOT introduce multi-tenant support,
-authentication/authorization, or role-based access complexity until an
-actual, concrete requirement demands it. Build the smallest thing that
-solves the current experimentation need; defer scaling, multi-user, and
-production-hardening concerns until they are real, tracked requirements.
+BYORAG supports multiple independent user accounts, each authenticating with
+their own credentials. Every corpus — and everything nested under it
+(documents, chunks, embeddings, chat history) — MUST belong to exactly one
+user account, and no user may see or act on another's data. Basic
+account-based authentication and per-user data ownership are a real,
+concrete requirement, not a hypothetical one, and MUST be supported. What
+remains out of scope until an actual, concrete requirement demands it:
+shared or collaborative corpora across accounts, role-based permissions or
+admin oversight of other users' data, third-party OAuth/SSO providers,
+login rate-limiting/lockout, and per-account storage quotas. Build the
+smallest multi-user model that gives each user their own private, isolated
+experimentation space; defer collaboration, enterprise-grade auth
+hardening, and abuse-prevention infrastructure until they are real, tracked
+requirements.
 
-**Rationale**: Premature generalization for hypothetical future users
-slows down the core goal of enabling fast RAG experimentation for the one
-user this tool currently serves.
+**Rationale**: A single local user was the right starting scope while
+BYORAG served one person experimenting locally, but real multi-user usage
+makes basic account-based ownership a genuine requirement rather than a
+hypothetical one. The same YAGNI discipline that justified single-user
+simplicity now applies one level up: support real per-user isolation, but
+keep resisting speculative complexity (sharing, roles, SSO, quotas) until
+an actual need for it arrives.
 
 ### IV. Fixed Technology Stack
 
@@ -81,7 +106,8 @@ The application uses a fixed, agreed technology stack:
 - Vector store: Qdrant
 - Relational database: PostgreSQL (local), for structured metadata — corpora,
   documents, document-corpus associations, and chunks
-- Source storage: local filesystem (PDFs)
+- Source storage: PostgreSQL — PDF content is stored in the database,
+  associated with its owning document/corpus, not on the local filesystem
 - Deployment: Docker (the application and its dependencies, including
   Qdrant and PostgreSQL, MUST run via Docker/docker-compose)
 
@@ -96,7 +122,12 @@ the app is reproducibly deployable via Docker. PostgreSQL was added
 alongside the vector store to give relational entities (corpora, documents,
 and their many-to-many/one-to-many relationships) real referential
 integrity — something the vector store and flat-file storage are not
-designed to provide.
+designed to provide. PDF content itself later moved into PostgreSQL too
+(alongside its metadata) once multi-user support (Principle III) made a
+per-server local directory the wrong storage model: a user's documents
+must survive and remain reachable regardless of which backend instance
+handles their request, which only a shared, durable data store — not a
+local filesystem — can guarantee.
 
 ### V. Experiment Observability & Reproducibility
 
@@ -118,15 +149,19 @@ defeats the purpose of an experimentation tool.
   supports the pluggable-strategy and testing requirements above).
 - **Vector Database**: Qdrant, run as a containerized service.
 - **Relational Database**: PostgreSQL, run as a containerized service, storing
-  structured metadata — corpora, documents, document-corpus associations, and
-  chunks. Raw PDF bytes remain on the local filesystem (see Source Storage);
-  PostgreSQL stores their metadata and relationships.
-- **Source Storage**: PDFs are added by the user and stored on the local
-  filesystem; no cloud object storage is required at this stage.
+  both structured metadata (corpora, documents, document-corpus associations,
+  chunks) and — per Source Storage below — the PDF content itself.
+- **Source Storage**: PDFs are added by the user and stored as content in
+  PostgreSQL, associated with their owning document/corpus; no local
+  filesystem directory and no cloud object storage are required.
 - **Containerization**: The full application (frontend, backend, Qdrant, and
   PostgreSQL) MUST be runnable via Docker/docker-compose for a consistent,
   reproducible local environment.
-- **Users**: Single local user. No multi-user auth system is in scope.
+- **Users**: Multiple independent user accounts, each authenticating with their
+  own email/password credentials; every corpus and its nested data (documents,
+  chunks, embeddings, chat history) belongs to exactly one account. No
+  shared/collaborative corpora, roles, admin oversight, or third-party
+  OAuth/SSO are in scope yet (Principle III).
 
 ## Development Workflow
 
@@ -156,8 +191,9 @@ semantic versioning:
 
 All plans and specs MUST verify compliance with this constitution via the
 Constitution Check gate. Any complexity that violates a principle (e.g.,
-introducing multi-user auth, or a hardcoded non-pluggable pipeline stage)
-MUST be explicitly justified in the plan's Complexity Tracking section;
-unjustified violations MUST be simplified before implementation proceeds.
+introducing shared/collaborative corpora across accounts, or a hardcoded
+non-pluggable pipeline stage) MUST be explicitly justified in the plan's
+Complexity Tracking section; unjustified violations MUST be simplified
+before implementation proceeds.
 
-**Version**: 1.1.0 | **Ratified**: 2026-07-04 | **Last Amended**: 2026-07-14
+**Version**: 3.0.0 | **Ratified**: 2026-07-04 | **Last Amended**: 2026-07-29

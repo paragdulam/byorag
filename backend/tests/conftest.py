@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -6,6 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
+from app.auth import service as auth_service
 from app.config import settings
 from app.db.base import Base, engine, ensure_vector_extension, get_db
 from app.main import app
@@ -56,13 +58,42 @@ def db_session() -> Iterator[Session]:
 
 
 @pytest.fixture
-def client(pdfs_dir: Path, db_session: Session) -> Iterator[TestClient]:
+def anonymous_client(pdfs_dir: Path, db_session: Session) -> Iterator[TestClient]:
+    """A plain, unauthenticated `TestClient` — for the handful of tests that specifically
+    assert `401`-without-auth behavior (024-user-authentication). Every other test should
+    use the `client` fixture, which is authenticated by default. A separate `TestClient`
+    instance from `client`'s (even though both wrap the same `app`), so setting an auth
+    header on one can never leak onto the other."""
+
     def _override_get_db() -> Iterator[Session]:
         yield db_session
 
     app.dependency_overrides[get_db] = _override_get_db
     try:
         yield TestClient(app)
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture
+def client(pdfs_dir: Path, db_session: Session) -> Iterator[TestClient]:
+    """Authenticated by default: creates a test user directly against `db_session`
+    (bypassing a live HTTP round-trip) and attaches its session token to every request, so
+    the large majority of existing tests keep passing unchanged now that every endpoint
+    requires a signed-in user (024-user-authentication research.md §9)."""
+
+    def _override_get_db() -> Iterator[Session]:
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_get_db
+    try:
+        test_client = TestClient(app)
+        user = auth_service.create_user(
+            db_session, f"test-{uuid.uuid4().hex}@example.com", "hunter22"
+        )
+        token = auth_service.create_session(db_session, user.id)
+        test_client.headers["Authorization"] = f"Bearer {token}"
+        yield test_client
     finally:
         app.dependency_overrides.pop(get_db, None)
 

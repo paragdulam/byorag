@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { SourceDocumentPreview } from '../../src/components/sources/SourceDocumentPreview'
 
 interface MockDocumentProps {
-  file: string
+  file: { url: string; httpHeaders?: Record<string, string> }
   onLoadSuccess?: (result: { numPages: number }) => void
   onLoadError?: () => void
   children?: React.ReactNode
@@ -37,7 +37,7 @@ describe('SourceDocumentPreview (021-sources-chunking-embeddings-refresh US2)', 
       <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
     )
 
-    expect(latestDocumentProps?.file).toBe('/api/sources/doc-1/file')
+    expect(latestDocumentProps?.file.url).toBe('/api/sources/doc-1/file')
   })
 
   it('renders one Page per numPages reported by onLoadSuccess', () => {

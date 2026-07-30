@@ -15,7 +15,7 @@ describe('CorporaScreen navigation (009-corpora-screen US1)', () => {
   it('navigates to a dedicated Corpora screen, distinct from the sidebar quick-switcher list', async () => {
     render(<App />)
 
-    await userEvent.click(screen.getByText('CORPORA'))
+    await userEvent.click(await screen.findByText('CORPORA'))
 
     expect(screen.getByRole('heading', { name: 'Corpora' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Data Sources' })).not.toBeInTheDocument()
@@ -89,7 +89,7 @@ describe('Cross-section scoping from the Corpora screen (009-corpora-screen US2)
   }
 
   async function switchToCorpusBViaCorporaScreen() {
-    await userEvent.click(screen.getByText('CORPORA'))
+    await userEvent.click(await screen.findByText('CORPORA'))
     await waitFor(() => expect(screen.getByTestId('corpus-row-corpus-b')).toBeInTheDocument())
     // Row clicks no longer switch the active corpus (018-ui-polish-batch US5) — only the
     // row's own explicit "Make Active" button does.
@@ -184,7 +184,7 @@ describe('Deleting the active corpus falls back correctly (009-corpora-screen US
 
     render(<App />)
 
-    await userEvent.click(screen.getByText('CORPORA'))
+    await userEvent.click(await screen.findByText('CORPORA'))
     await waitFor(() => expect(screen.getByTestId('corpus-row-corpus-a')).toBeInTheDocument())
     // Corpus A is active by default (first in the list).
     expect(screen.getByTestId('corpus-row-corpus-a')).toHaveAttribute('aria-current', 'page')

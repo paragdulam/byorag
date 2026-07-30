@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from fastapi.testclient import TestClient
 
 from tests.pdf_helpers import make_multi_page_words_pdf, make_words_pdf
@@ -85,23 +83,6 @@ def test_structured_preview_zero_saved_chunks_returns_404(
 
     assert response.status_code == 404
     assert "no saved chunks" in response.json()["detail"].lower()
-
-
-def test_structured_preview_missing_file_returns_404(
-    client: TestClient, pdfs_dir: Path, corpus_id: str
-) -> None:
-    document_id = upload_pdf(client, corpus_id, "report.pdf", make_words_pdf(20))
-    save_chunks(client, document_id, chunk_size=5, overlap=0)
-    for path in pdfs_dir.iterdir():
-        path.unlink()
-
-    response = client.get(
-        "/api/chunking/structured-preview", params={"documentId": document_id}
-    )
-
-    assert response.status_code == 404
-    detail = response.json()["detail"].lower()
-    assert "missing" in detail or "unreadable" in detail
 
 
 def test_structured_preview_pages_partition_full_text_for_single_page_document(

@@ -1,3 +1,4 @@
+import { apiFetch, appendTokenQueryParam } from './apiClient'
 import type { ChunkProgressEvent, ChunkRunResponse } from '../types/chunking'
 import type { SavedChunk } from '../types/embeddings'
 
@@ -51,7 +52,7 @@ export function runChunkingStream(
   { onProgress, onResult, onError }: ChunkingStreamHandlers,
 ): () => void {
   const url = `${CHUNKING_STREAM_ENDPOINT}?documentId=${encodeURIComponent(documentId)}&chunkSize=${encodeURIComponent(String(chunkSize))}&overlap=${encodeURIComponent(String(overlap))}`
-  const source = new EventSource(url)
+  const source = new EventSource(appendTokenQueryParam(url))
 
   source.addEventListener('progress', (event) => {
     const data = JSON.parse((event as MessageEvent).data) as ChunkProgressEvent
@@ -92,7 +93,7 @@ export function saveChunksStream(
   { onProgress, onResult, onError }: ChunkingStreamHandlers,
 ): () => void {
   const url = `${CHUNKING_SAVE_STREAM_ENDPOINT}?documentId=${encodeURIComponent(documentId)}&chunkSize=${encodeURIComponent(String(chunkSize))}&overlap=${encodeURIComponent(String(overlap))}`
-  const source = new EventSource(url)
+  const source = new EventSource(appendTokenQueryParam(url))
 
   source.addEventListener('progress', (event) => {
     const data = JSON.parse((event as MessageEvent).data) as ChunkProgressEvent
@@ -124,7 +125,7 @@ export function saveChunksStream(
  */
 export async function listSavedChunks(documentId: string): Promise<SavedChunk[]> {
   const url = `${CHUNKING_SAVED_CHUNKS_ENDPOINT}?documentId=${encodeURIComponent(documentId)}`
-  const response = await fetch(url)
+  const response = await apiFetch(url)
 
   if (!response.ok) {
     throw new Error(`Failed to load saved chunks: ${response.status}`)
@@ -141,7 +142,7 @@ export async function listSavedChunks(documentId: string): Promise<SavedChunk[]>
  */
 export async function fetchStructuredPreview(documentId: string): Promise<StructuredPreview> {
   const url = `${CHUNKING_STRUCTURED_PREVIEW_ENDPOINT}?documentId=${encodeURIComponent(documentId)}`
-  const response = await fetch(url)
+  const response = await apiFetch(url)
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { detail?: string } | null

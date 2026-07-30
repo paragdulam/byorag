@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.chunking.service import list_saved_chunks
-from app.db.lookups import get_document_or_none
+from app.db.lookups import get_document_owned_by
 from app.db.models import Chunk as ChunkRow
 from app.db.models import Document
 from app.db.models import Embedding as EmbeddingRow
@@ -78,15 +78,19 @@ _EmbedStepType = Literal["progress", "vectors"]
 _EmbedStep = tuple[_EmbedStepType, dict[str, int] | list[EmbeddingVectorOut]]
 
 
-def resolve_embedding_run(db: Session, document_id: str, model: str) -> tuple[Document, list[ChunkRow]]:
-    """Validates model/document/saved-chunks existence and returns the resolved
-    `Document` plus its saved `Chunk` rows — everything that can be checked
-    synchronously before a streaming response opens (mirrors chunking's `resolve_run`,
-    013-bert-pgvector-embeddings contracts/embeddings-api.md)."""
+def resolve_embedding_run(
+    db: Session, user_id: str, document_id: str, model: str
+) -> tuple[Document, list[ChunkRow]]:
+    """Validates model/document-ownership/saved-chunks existence and returns the resolved
+    `Document` plus its saved `Chunk` rows — everything that can be checked synchronously
+    before a streaming response opens (mirrors chunking's `resolve_run`,
+    013-bert-pgvector-embeddings contracts/embeddings-api.md). A document owned by a
+    different user raises the same `FileNotFoundError` as a nonexistent one
+    (024-user-authentication FR-009)."""
     if model not in EMBEDDING_MODELS:
         raise ValueError(f"Unsupported embedding model: {model!r}")
 
-    document = get_document_or_none(db, document_id)
+    document = get_document_owned_by(db, document_id, user_id)
     if document is None:
         raise FileNotFoundError(f"No document found with id {document_id!r}")
 
