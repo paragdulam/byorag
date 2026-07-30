@@ -51,7 +51,7 @@ describe('DocumentList (US1: rendering rows + status transition)', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (_url: string, init?: RequestInit) => {
-        if (!init) {
+        if (!init?.method) {
           return new Response(JSON.stringify({ documents: [] }), { status: 200 })
         }
         return uploadPromise

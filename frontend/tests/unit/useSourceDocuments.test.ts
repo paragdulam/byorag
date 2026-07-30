@@ -44,7 +44,7 @@ describe('useSourceDocuments (US1: API-backed persistence)', () => {
 
   it('uploads files via the API from addFiles and adds the returned documents to the list', async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      if (!init) {
+      if (!init?.method) {
         return jsonResponse({ documents: [] })
       }
       return jsonResponse({
@@ -89,7 +89,7 @@ describe('useSourceDocuments (US1: API-backed persistence)', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (_url: string, init?: RequestInit) => {
-        if (!init) {
+        if (!init?.method) {
           return jsonResponse({ documents: [] })
         }
         return jsonResponse({
@@ -124,7 +124,7 @@ describe('useSourceDocuments (004: deleteDocuments)', () => {
         if (href.endsWith('/api/sources/delete')) {
           return jsonResponse({ results: deleteResults })
         }
-        if (!init) {
+        if (!init?.method) {
           return jsonResponse({
             documents: [
               {

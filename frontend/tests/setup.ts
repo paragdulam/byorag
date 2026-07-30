@@ -29,6 +29,13 @@ beforeEach(() => {
     vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString()
 
+      if (url.includes('/api/auth/me')) {
+        return new Response(
+          JSON.stringify({ id: 'default-user', email: 'test@example.com' }),
+          { status: 200 },
+        )
+      }
+
       if (url.includes('/api/corpora')) {
         return new Response(
           JSON.stringify({

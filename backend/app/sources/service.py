@@ -1,12 +1,9 @@
-from pathlib import Path
-
 from fastapi import UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import ensure_pdfs_dir, settings
 from app.db.hashing import compute_content_hash
-from app.db.lookups import get_corpus_or_none, get_document_or_none
+from app.db.lookups import get_corpus_owned_by, get_document_owned_by
 from app.db.models import Document, DocumentCorpus
 from app.sources.schemas import (
     AllSourceDocument,
@@ -50,15 +47,25 @@ def _document_to_source_document(document: Document) -> SourceDocument:
     )
 
 
-def list_all_documents(db: Session) -> list[AllSourceDocument]:
-    """Every document in the system, regardless of corpus, each annotated with
-    every corpus it's currently associated with (009-corpora-screen,
-    contracts/list-all-documents-api.md). Unpaginated, consistent with this
+def list_all_documents(db: Session, user_id: str) -> list[AllSourceDocument]:
+    """Every document owned by `user_id`, each annotated with every corpus it's
+    currently associated with (009-corpora-screen, contracts/list-all-documents-api.md;
+    scoped per user by 024-user-authentication). Unpaginated, consistent with this
     project's established small/personal scale assumption."""
     documents = (
-        db.execute(select(Document).order_by(Document.uploaded_at.asc())).scalars().all()
+        db.execute(
+            select(Document)
+            .where(Document.user_id == user_id)
+            .order_by(Document.uploaded_at.asc())
+        )
+        .scalars()
+        .all()
     )
-    links = db.execute(select(DocumentCorpus)).scalars().all()
+    links = db.execute(
+        select(DocumentCorpus).where(
+            DocumentCorpus.document_id.in_([document.id for document in documents])
+        )
+    ).scalars().all()
 
     corpus_ids_by_document: dict[str, list[str]] = {}
     for link in links:
@@ -128,7 +135,7 @@ def _link_document_to_corpus(db: Session, document_id: str, corpus_id: str) -> N
 
 
 def save_file(
-    upload: UploadFile, db: Session, corpus_id: str
+    upload: UploadFile, db: Session, corpus_id: str, user_id: str
 ) -> SourceDocument | UploadRejection:
     contents = upload.file.read()
 
@@ -138,32 +145,29 @@ def save_file(
 
     content_hash = compute_content_hash(contents)
     existing = db.execute(
-        select(Document).where(Document.content_hash == content_hash)
+        select(Document).where(
+            Document.content_hash == content_hash, Document.user_id == user_id
+        )
     ).scalar_one_or_none()
     if existing is not None:
         # Auto-dedupe by content (FR-005, research.md §3): reuse the existing
-        # document and its chunks instead of writing a duplicate file or
-        # re-running chunking.
+        # document and its chunks instead of writing a duplicate row or
+        # re-running chunking. Scoped to this user's own documents — content
+        # matching another user's document is a coincidence, not a dedupe target
+        # (corpora/documents are strictly private, spec.md Clarifications).
         _link_document_to_corpus(db, existing.id, corpus_id)
         return _document_to_source_document(existing)
 
-    directory = settings.pdfs_dir
-    ensure_pdfs_dir(directory)
-    existing_names = {p.name for p in directory.iterdir() if p.is_file()}
+    existing_names = set(
+        db.execute(select(Document.name).where(Document.user_id == user_id)).scalars().all()
+    )
     target_name = resolve_collision_name(upload.filename or "", existing_names)
-    target_path = directory / target_name
-
-    try:
-        target_path.write_bytes(contents)
-    except OSError:
-        if target_path.exists():
-            target_path.unlink(missing_ok=True)
-        return UploadRejection(fileName=upload.filename or "", reason="save-failed")
 
     document = Document(
+        user_id=user_id,
         name=target_name,
         content_hash=content_hash,
-        storage_path=str(target_path),
+        content=contents,
         size_bytes=len(contents),
         status="processed",
     )
@@ -175,23 +179,27 @@ def save_file(
     return _document_to_source_document(document)
 
 
-def attach_document_to_corpus(db: Session, document_id: str, corpus_id: str) -> None:
-    if get_document_or_none(db, document_id) is None:
+def attach_document_to_corpus(db: Session, user_id: str, document_id: str, corpus_id: str) -> None:
+    """A document may only be attached to a corpus sharing its owner — since both lookups
+    below already require `user_id` ownership, this is automatically satisfied (corpora and
+    documents are strictly private, 024-user-authentication research.md §7)."""
+    if get_document_owned_by(db, document_id, user_id) is None:
         raise DocumentNotFoundError(document_id)
-    if get_corpus_or_none(db, corpus_id) is None:
+    if get_corpus_owned_by(db, corpus_id, user_id) is None:
         raise CorpusNotFoundError(corpus_id)
 
     _link_document_to_corpus(db, document_id, corpus_id)
 
 
-def unlink_document_from_corpus(db: Session, document_id: str, corpus_id: str) -> None:
+def unlink_document_from_corpus(db: Session, user_id: str, document_id: str, corpus_id: str) -> None:
     """Unlink a document from one corpus (FR-007). If this was the document's
-    last remaining corpus, delete the document, its chunks (DB cascade), and
-    its file (FR-008, research.md §6)."""
-    document = get_document_or_none(db, document_id)
+    last remaining corpus, delete the document and its chunks (DB cascade) —
+    its content lives entirely in this row, with nothing left over to
+    separately clean up (024-user-authentication research.md §8)."""
+    document = get_document_owned_by(db, document_id, user_id)
     if document is None:
         raise DocumentNotFoundError(document_id)
-    if get_corpus_or_none(db, corpus_id) is None:
+    if get_corpus_owned_by(db, corpus_id, user_id) is None:
         raise CorpusNotFoundError(corpus_id)
 
     link = db.get(DocumentCorpus, {"document_id": document_id, "corpus_id": corpus_id})
@@ -209,45 +217,33 @@ def unlink_document_from_corpus(db: Session, document_id: str, corpus_id: str) -
         db.commit()
         return
 
-    storage_path = Path(document.storage_path)
     db.delete(document)
     db.commit()
-    storage_path.unlink(missing_ok=True)
 
 
-def get_document_file_path(db: Session, document_id: str) -> Path:
-    """Resolves a document's stored PDF path for the file-serving endpoint
-    (021-sources-chunking-embeddings-refresh contracts/sources-file-api.md).
-    Raises `DocumentNotFoundError` for an unknown id, or `FileNotFoundError` if
-    the row exists but its file no longer resolves on disk — kept distinct so
-    the router can return the two different 404 messages the contract requires.
-    """
-    document = get_document_or_none(db, document_id)
+def get_document_content(db: Session, document_id: str) -> bytes:
+    """Resolves a document's stored PDF bytes for the file-serving endpoint
+    (021-sources-chunking-embeddings-refresh contracts/sources-file-api.md, updated by
+    024-user-authentication research.md §8 to read from the database instead of a
+    filesystem path). Ownership is asserted by the router before this is called; raises
+    `DocumentNotFoundError` only for a truly unknown id."""
+    document = db.get(Document, document_id)
     if document is None:
         raise DocumentNotFoundError(document_id)
 
-    storage_path = Path(document.storage_path)
-    if not storage_path.is_file():
-        raise FileNotFoundError(document_id)
-
-    return storage_path
+    return document.content
 
 
-def delete_documents(db: Session, ids: list[str]) -> list[DeletionResult]:
+def delete_documents(db: Session, user_id: str, ids: list[str]) -> list[DeletionResult]:
     results: list[DeletionResult] = []
     for document_id in ids:
-        document = get_document_or_none(db, document_id)
+        document = get_document_owned_by(db, document_id, user_id)
         if document is None:
-            # Idempotent: the desired end state (no such document) already
-            # holds, matching 004-delete-source-documents' original semantics.
+            # Idempotent: the desired end state (no such document of yours) already
+            # holds, matching 004-delete-source-documents' original semantics — also
+            # covers a cross-account id, which must look identical to an unknown one
+            # (FR-009).
             results.append(DeletionResult(id=document_id, status="deleted"))
-            continue
-
-        storage_path = Path(document.storage_path)
-        try:
-            storage_path.unlink(missing_ok=True)
-        except OSError as exc:
-            results.append(DeletionResult(id=document_id, status="failed", reason=str(exc)))
             continue
 
         db.delete(document)

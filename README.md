@@ -2,7 +2,8 @@
 
 **Build (and compare) your own Retrieval-Augmented Generation pipelines.**
 
-BYORAG is a local, single-user experimentation tool for RAG. Upload PDFs, chunk them,
+BYORAG is a local experimentation tool for RAG, built around per-user accounts so each
+user's corpora and experiments stay private to them. Upload PDFs, chunk them,
 generate embeddings, inspect the vectors, chat against the retrieved context, and score
 the result — every stage is a swappable strategy, so you can change one variable at a
 time and see what actually moves the needle.
@@ -50,7 +51,7 @@ different pipelines run on the same corpus can be compared meaningfully in Metri
 |---|---|
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS 4, `react-pdf`, `recharts` |
 | Backend | Python 3.12, FastAPI, SQLAlchemy |
-| Data | PostgreSQL with the `pgvector` extension — one database for both relational metadata (corpora, documents, chunks) and vector storage |
+| Data | PostgreSQL with the `pgvector` extension — one database for relational metadata (corpora, documents, chunks), vector storage, and PDF content itself |
 | ML / NLP | `transformers` + `torch` (BERT embeddings), `scikit-learn` + `umap-learn` (2D projections) |
 | LLM | Anthropic Claude — used for both chat generation and judge-based evaluation |
 | Testing | `pytest` (backend), `Vitest` (frontend unit/integration), `Playwright` (frontend e2e) |
@@ -97,11 +98,17 @@ npm run dev
 The Vite dev server proxies `/api/*` requests to `http://localhost:8000` (see
 `frontend/vite.config.ts`), so no extra frontend configuration is needed.
 
+Either way, once the app is up, open it in the browser and sign up for an account —
+every corpus, document, and everything nested under it belongs to exactly one account, so
+there's nothing to upload or browse until you're signed in. The very first account ever
+created on a given database automatically claims any pre-existing corpora/documents (e.g.
+if you're upgrading a pre-multi-user install).
+
 ### Environment variables (backend)
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PDFS_DIR` | `./pdfs` | Where uploaded PDFs are stored on disk |
+| `PDFS_DIR` | `./pdfs` | A one-time legacy-import source directory only — any PDFs found here at startup are migrated into the database and claimed by the first account to sign up. Uploaded PDFs are stored directly in Postgres, not on disk, so this is unused in ordinary operation. |
 | `DATABASE_URL` | `postgresql+psycopg://byorag:byorag@localhost:5432/byorag` | Postgres connection string |
 | `ANTHROPIC_API_KEY` | *(none)* | Required for Playground (chat generation) and Metrics (judge scoring) |
 | `ANTHROPIC_MODEL` | `claude-sonnet-5` | Model used for both generation and evaluation |
@@ -130,8 +137,9 @@ Features are built through a spec-driven workflow (spec → plan → tasks → i
 every feature under `specs/` has a specification, an implementation plan, and a task
 breakdown before any code is written. The ground rules for that process live in
 [`.specify/memory/constitution.md`](.specify/memory/constitution.md): pluggable pipeline
-stages, test-first development, single-user simplicity (no premature multi-tenant/auth
-complexity), a fixed technology stack, and full experiment traceability.
+stages, test-first development, multi-user simplicity (per-user data ownership, without
+premature sharing/roles/SSO complexity), a fixed technology stack, and full experiment
+traceability.
 
 ## Project layout
 

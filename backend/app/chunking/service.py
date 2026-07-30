@@ -1,7 +1,7 @@
+import io
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal
 
 from pypdf import PdfReader
@@ -18,7 +18,7 @@ from app.chunking.schemas import (
     PreviewSegment,
 )
 from app.chunking.strategies.base import STRATEGIES
-from app.db.lookups import get_document_or_none
+from app.db.lookups import get_document_owned_by
 from app.db.models import Chunk as ChunkRow
 from app.db.models import Document
 
@@ -52,12 +52,14 @@ class _ChunkComputation:
 _ChunkComputationStep = tuple[_ChunkComputationStepType, dict[str, int] | _ChunkComputation]
 
 
-def extract_text_pages(pdf_path: Path) -> tuple[int, Iterator[str]]:
+def extract_text_pages(pdf_content: bytes) -> tuple[int, Iterator[str]]:
     """Returns (total_pages, iterator of per-page extracted text). `total_pages` is `0`
     when the PDF cannot be read at all (mirrors the previous `extract_text()`'s
-    broad-except "no text" behavior, research.md §1)."""
+    broad-except "no text" behavior, research.md §1). Reads directly from the document's
+    database-stored bytes rather than a filesystem path (024-user-authentication
+    research.md §8)."""
     try:
-        reader = PdfReader(str(pdf_path))
+        reader = PdfReader(io.BytesIO(pdf_content))
         total_pages = len(reader.pages)
     except Exception:
         return 0, iter(())
@@ -74,18 +76,21 @@ def extract_text_pages(pdf_path: Path) -> tuple[int, Iterator[str]]:
 
 def resolve_run(
     db: Session,
+    user_id: str,
     document_id: str,
     chunk_size: int,
     strategy: str,
     overlap: int = 0,
 ) -> Document:
-    """Validates chunk_size/overlap/strategy/document existence and returns the resolved
-    `Document` row — everything that can be checked synchronously before a streaming
-    response opens (research.md §3). Raises ValueError/FileNotFoundError exactly as the
-    previous single-shot `run_chunking()` did. `overlap` must stay below `chunk_size` so
-    the fixed-size stride (`chunk_size - overlap`) never reaches zero or negative
-    (007-chunking-overlap-controls research.md §2). `document_id` is now the
-    server-generated `Document` UUID (008-corpora-management), not an on-disk filename."""
+    """Validates chunk_size/overlap/strategy/document existence-and-ownership and returns
+    the resolved `Document` row — everything that can be checked synchronously before a
+    streaming response opens (research.md §3). Raises ValueError/FileNotFoundError exactly
+    as the previous single-shot `run_chunking()` did — a document owned by a different user
+    raises the same `FileNotFoundError` as a nonexistent one (024-user-authentication
+    FR-009). `overlap` must stay below `chunk_size` so the fixed-size stride
+    (`chunk_size - overlap`) never reaches zero or negative (007-chunking-overlap-controls
+    research.md §2). `document_id` is now the server-generated `Document` UUID
+    (008-corpora-management), not an on-disk filename."""
     if chunk_size <= 0:
         raise ValueError("chunkSize must be a positive integer")
 
@@ -95,7 +100,7 @@ def resolve_run(
     if strategy not in STRATEGIES:
         raise ValueError(f"Unsupported strategy: {strategy!r}")
 
-    document = get_document_or_none(db, document_id)
+    document = get_document_owned_by(db, document_id, user_id)
     if document is None:
         raise FileNotFoundError(f"No document found with id {document_id!r}")
 
@@ -136,7 +141,7 @@ def _stream_chunk_computation(
     events as pages are extracted (0-90, real per-page progress — research.md §1 from `012`),
     then a final `("computed", _ChunkComputation)` step."""
     strategy_impl = STRATEGIES[strategy]
-    total_pages, pages = extract_text_pages(Path(document.storage_path))
+    total_pages, pages = extract_text_pages(document.content)
 
     page_texts: list[str] = []
     if total_pages > 0:
@@ -287,7 +292,7 @@ def compute_structured_preview(
     if not saved_chunks:
         raise NoSavedChunksError(document.id)
 
-    total_pages, pages = extract_text_pages(Path(document.storage_path))
+    total_pages, pages = extract_text_pages(document.content)
     if total_pages == 0:
         raise DocumentFileUnavailableError(document.id)
 

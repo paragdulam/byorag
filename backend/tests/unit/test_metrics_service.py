@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy.orm import Session
 
+from app.auth import service as auth_service
 from app.db.models import EMBEDDING_DIMENSIONS
 from app.db.models import Chunk as ChunkRow
 from app.db.models import ConversationTurn, Corpus, Document, DocumentCorpus
@@ -12,14 +13,24 @@ from app.db.models import TurnQualityScore
 from app.metrics import service
 
 
+@pytest.fixture
+def user_id(db_session: Session) -> str:
+    return auth_service.create_user(db_session, "metrics-owner@example.com", "hunter22").id
+
+
 def _make_corpus_with_chunked_document(
-    db_session: Session, strategy: str = "fixed-size", model: str = "bert", chunk_count: int = 3
+    db_session: Session,
+    user_id: str,
+    strategy: str = "fixed-size",
+    model: str = "bert",
+    chunk_count: int = 3,
 ) -> tuple[Corpus, Document]:
-    corpus = Corpus(name=f"corpus-{uuid.uuid4()}")
+    corpus = Corpus(user_id=user_id, name=f"corpus-{uuid.uuid4()}")
     document = Document(
+        user_id=user_id,
         name="doc.pdf",
         content_hash=f"hash-{uuid.uuid4()}",
-        storage_path="/tmp/does-not-matter.pdf",
+        content=b"x",
         size_bytes=10,
         status="processed",
     )
@@ -80,11 +91,13 @@ def _add_score(
     db_session.flush()
 
 
-def test_list_pipelines_reports_chunk_count_for_a_corpus_with_no_questions(db_session: Session) -> None:
-    corpus, _ = _make_corpus_with_chunked_document(db_session, chunk_count=4)
+def test_list_pipelines_reports_chunk_count_for_a_corpus_with_no_questions(
+    db_session: Session, user_id: str
+) -> None:
+    corpus, _ = _make_corpus_with_chunked_document(db_session, user_id, chunk_count=4)
     db_session.commit()
 
-    result = service.list_pipelines(db_session, corpus.id)
+    result = service.list_pipelines(db_session, user_id, corpus.id)
 
     assert len(result.pipelines) == 1
     pipeline = result.pipelines[0]
@@ -94,15 +107,17 @@ def test_list_pipelines_reports_chunk_count_for_a_corpus_with_no_questions(db_se
     assert pipeline.scores is None
 
 
-def test_list_pipelines_averages_scores_and_reports_sample_size(db_session: Session) -> None:
-    corpus, document = _make_corpus_with_chunked_document(db_session)
+def test_list_pipelines_averages_scores_and_reports_sample_size(
+    db_session: Session, user_id: str
+) -> None:
+    corpus, document = _make_corpus_with_chunked_document(db_session, user_id)
     turn1 = _make_turn(db_session, document, strategy="fixed-size", model="bert", answered=True)
     turn2 = _make_turn(db_session, document, strategy="fixed-size", model="bert", answered=True)
     _add_score(db_session, turn1, context_precision=1.0, context_recall=0.5, response_relevancy=0.8, faithfulness=0.6)
     _add_score(db_session, turn2, context_precision=0.6, context_recall=0.9, response_relevancy=0.4, faithfulness=1.0)
     db_session.commit()
 
-    result = service.list_pipelines(db_session, corpus.id)
+    result = service.list_pipelines(db_session, user_id, corpus.id)
 
     pipeline = result.pipelines[0]
     assert pipeline.questionCount == 2
@@ -115,14 +130,16 @@ def test_list_pipelines_averages_scores_and_reports_sample_size(db_session: Sess
     assert pipeline.scores.faithfulness == pytest.approx(0.8)
 
 
-def test_list_pipelines_excludes_unscored_turns_from_the_sample(db_session: Session) -> None:
-    corpus, document = _make_corpus_with_chunked_document(db_session)
+def test_list_pipelines_excludes_unscored_turns_from_the_sample(
+    db_session: Session, user_id: str
+) -> None:
+    corpus, document = _make_corpus_with_chunked_document(db_session, user_id)
     scored = _make_turn(db_session, document, strategy="fixed-size", model="bert", answered=True)
     _make_turn(db_session, document, strategy="fixed-size", model="bert", answered=True)  # unscored
     _add_score(db_session, scored)
     db_session.commit()
 
-    result = service.list_pipelines(db_session, corpus.id)
+    result = service.list_pipelines(db_session, user_id, corpus.id)
 
     pipeline = result.pipelines[0]
     assert pipeline.questionCount == 2
@@ -130,8 +147,8 @@ def test_list_pipelines_excludes_unscored_turns_from_the_sample(db_session: Sess
     assert pipeline.scores.sampleSize == 1
 
 
-def test_list_pipelines_reports_scope_breakdown(db_session: Session) -> None:
-    corpus, document = _make_corpus_with_chunked_document(db_session)
+def test_list_pipelines_reports_scope_breakdown(db_session: Session, user_id: str) -> None:
+    corpus, document = _make_corpus_with_chunked_document(db_session, user_id)
     _make_turn(db_session, document, strategy="fixed-size", model="bert", scope="document")
     _make_turn(db_session, document, strategy="fixed-size", model="bert", scope="document")
     _make_turn(
@@ -140,7 +157,7 @@ def test_list_pipelines_reports_scope_breakdown(db_session: Session) -> None:
     )
     db_session.commit()
 
-    result = service.list_pipelines(db_session, corpus.id)
+    result = service.list_pipelines(db_session, user_id, corpus.id)
 
     pipeline = result.pipelines[0]
     assert pipeline.scopeBreakdown.document == 2
@@ -148,8 +165,10 @@ def test_list_pipelines_reports_scope_breakdown(db_session: Session) -> None:
     assert pipeline.questionCount == 3
 
 
-def test_list_pipelines_separates_multiple_techniques_on_the_same_corpus(db_session: Session) -> None:
-    corpus, document = _make_corpus_with_chunked_document(db_session, strategy="fixed-size", chunk_count=2)
+def test_list_pipelines_separates_multiple_techniques_on_the_same_corpus(
+    db_session: Session, user_id: str
+) -> None:
+    corpus, document = _make_corpus_with_chunked_document(db_session, user_id, strategy="fixed-size", chunk_count=2)
     for i in range(3):
         chunk = ChunkRow(
             document_id=document.id, index=100 + i, content=f"other {i}", strategy="semantic",
@@ -160,50 +179,54 @@ def test_list_pipelines_separates_multiple_techniques_on_the_same_corpus(db_sess
         db_session.add(EmbeddingRow(chunk_id=chunk.id, model="bert", vector=[0.0] * EMBEDDING_DIMENSIONS))
     db_session.commit()
 
-    result = service.list_pipelines(db_session, corpus.id)
+    result = service.list_pipelines(db_session, user_id, corpus.id)
 
     strategies = {p.chunkingStrategy: p.chunkCount for p in result.pipelines}
     assert strategies == {"fixed-size": 2, "semantic": 3}
 
 
-def test_list_corpora_summary_flags_a_corpus_with_no_saved_chunks(db_session: Session) -> None:
-    corpus = Corpus(name="empty corpus")
+def test_list_corpora_summary_flags_a_corpus_with_no_saved_chunks(
+    db_session: Session, user_id: str
+) -> None:
+    corpus = Corpus(user_id=user_id, name="empty corpus")
     db_session.add(corpus)
     db_session.commit()
 
-    result = service.list_corpora_summary(db_session)
+    result = service.list_corpora_summary(db_session, user_id)
 
     entry = next(c for c in result.corpora if c.corpusId == corpus.id)
     assert entry.chunkingStrategies == []
     assert entry.hasPipelines is False
 
 
-def test_list_pipelines_reports_retrieval_strategy_even_with_no_questions(db_session: Session) -> None:
-    corpus, _ = _make_corpus_with_chunked_document(db_session)
+def test_list_pipelines_reports_retrieval_strategy_even_with_no_questions(
+    db_session: Session, user_id: str
+) -> None:
+    corpus, _ = _make_corpus_with_chunked_document(db_session, user_id)
     db_session.commit()
 
-    result = service.list_pipelines(db_session, corpus.id)
+    result = service.list_pipelines(db_session, user_id, corpus.id)
 
     assert result.pipelines[0].retrievalStrategy == "cosine-similarity"
 
 
 def test_list_pipelines_generation_and_judge_llm_are_none_with_no_qualifying_turns(
-    db_session: Session,
+    db_session: Session, user_id: str,
 ) -> None:
-    corpus, document = _make_corpus_with_chunked_document(db_session)
+    corpus, document = _make_corpus_with_chunked_document(db_session, user_id)
     _make_turn(db_session, document, strategy="fixed-size", model="bert", answered=False)
     db_session.commit()
 
-    pipeline = service.list_pipelines(db_session, corpus.id).pipelines[0]
+    pipeline = service.list_pipelines(db_session, user_id, corpus.id).pipelines[0]
 
     assert pipeline.generationLlm is None
     assert pipeline.judgeLlm is None
 
 
 def test_list_pipelines_shows_the_most_recently_answered_and_scored_models(
-    db_session: Session,
+    db_session: Session, user_id: str,
 ) -> None:
-    corpus, document = _make_corpus_with_chunked_document(db_session)
+    corpus, document = _make_corpus_with_chunked_document(db_session, user_id)
     earlier = _make_turn(
         db_session, document, strategy="fixed-size", model="bert", answered=True,
         llm_model="claude-sonnet-5", answered_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -222,7 +245,7 @@ def test_list_pipelines_shows_the_most_recently_answered_and_scored_models(
     )
     db_session.commit()
 
-    pipeline = service.list_pipelines(db_session, corpus.id).pipelines[0]
+    pipeline = service.list_pipelines(db_session, user_id, corpus.id).pipelines[0]
 
     assert pipeline.generationLlm == "claude-opus-4-8"
     assert pipeline.judgeLlm == "claude-opus-4-8"

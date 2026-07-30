@@ -8,8 +8,11 @@ import { CorporaScreen } from '../components/corpora/CorporaScreen'
 import { MetricsScreen } from '../components/metrics/MetricsScreen'
 import type { ScreenId } from '../components/layout/SidebarNav'
 import { CorpusProvider } from '../context/CorpusContext'
+import { AuthProvider, useAuth } from '../context/AuthContext'
+import { LoginScreen } from '../components/auth/LoginScreen'
+import { SignupScreen } from '../components/auth/SignupScreen'
 
-function App() {
+function AuthenticatedApp() {
   const [activeScreen, setActiveScreen] = useState<ScreenId>('sources')
 
   return (
@@ -30,6 +33,37 @@ function App() {
         <DataSourcesScreen onNavigate={setActiveScreen} />
       )}
     </CorpusProvider>
+  )
+}
+
+function AuthGate() {
+  const { currentUser, isLoading } = useAuth()
+  const [showSignup, setShowSignup] = useState(false)
+
+  if (isLoading) {
+    return (
+      <div className="flex h-full min-h-screen items-center justify-center bg-surface">
+        <p className="text-on-surface-variant">Loading…</p>
+      </div>
+    )
+  }
+
+  if (currentUser === null) {
+    return showSignup ? (
+      <SignupScreen onSwitchToLogin={() => setShowSignup(false)} />
+    ) : (
+      <LoginScreen onSwitchToSignup={() => setShowSignup(true)} />
+    )
+  }
+
+  return <AuthenticatedApp />
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
   )
 }
 

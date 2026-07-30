@@ -1,3 +1,4 @@
+import { apiFetch } from './apiClient'
 import type { ListCorporaResponse, ListPipelinesResponse } from '../types/metrics'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
@@ -5,7 +6,7 @@ const METRICS_CORPORA_ENDPOINT = `${API_BASE_URL}/api/metrics/corpora`
 
 /** Every corpus with the chunking techniques it has saved chunks for (contracts/metrics-api.md). */
 export async function fetchCorpora(): Promise<ListCorporaResponse> {
-  const response = await fetch(METRICS_CORPORA_ENDPOINT)
+  const response = await apiFetch(METRICS_CORPORA_ENDPOINT)
 
   if (!response.ok) {
     throw new Error(`Failed to load corpora: ${response.status}`)
@@ -19,7 +20,7 @@ export async function fetchCorpora(): Promise<ListCorporaResponse> {
  * count, question/answer counts, scope breakdown, and quality scores (contracts/metrics-api.md).
  */
 export async function fetchPipelines(corpusId: string): Promise<ListPipelinesResponse> {
-  const response = await fetch(`${METRICS_CORPORA_ENDPOINT}/${encodeURIComponent(corpusId)}/pipelines`)
+  const response = await apiFetch(`${METRICS_CORPORA_ENDPOINT}/${encodeURIComponent(corpusId)}/pipelines`)
 
   if (!response.ok) {
     throw new Error(`Failed to load pipelines: ${response.status}`)
@@ -34,7 +35,7 @@ export async function fetchPipelines(corpusId: string): Promise<ListPipelinesRes
  * that 400s when the corpus has fewer than 2 pipelines.
  */
 export async function fetchComparison(corpusId: string): Promise<ListPipelinesResponse> {
-  const response = await fetch(`${METRICS_CORPORA_ENDPOINT}/${encodeURIComponent(corpusId)}/compare`)
+  const response = await apiFetch(`${METRICS_CORPORA_ENDPOINT}/${encodeURIComponent(corpusId)}/compare`)
 
   if (!response.ok) {
     throw new Error(`Failed to load comparison: ${response.status}`)

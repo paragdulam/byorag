@@ -5,7 +5,11 @@ from sqlalchemy.orm import Session
 
 from app.chunking.service import list_saved_chunks
 from app.config import settings
-from app.db.lookups import get_conversation_turn_or_none, get_corpus_or_none, get_document_or_none
+from app.db.lookups import (
+    get_conversation_turn_owned_by,
+    get_corpus_owned_by,
+    get_document_owned_by,
+)
 from app.db.models import Chunk as ChunkRow
 from app.db.models import ConversationTurn, ConversationTurnChunk, Document, DocumentCorpus
 from app.db.models import Embedding as EmbeddingRow
@@ -63,7 +67,7 @@ def _require_exactly_one_scope(document_id: str | None, corpus_id: str | None) -
 
 
 def get_context(
-    db: Session, document_id: str | None, *, corpus_id: str | None = None
+    db: Session, user_id: str, document_id: str | None, *, corpus_id: str | None = None
 ) -> PlaygroundContextResponse:
     """Read-only projection over a document's or an entire corpus's saved chunks/embeddings,
     powering the Playground's pre-search display (016-playground-similarity-search spec User
@@ -73,7 +77,7 @@ def get_context(
     _require_exactly_one_scope(document_id, corpus_id)
 
     if document_id is not None:
-        document = get_document_or_none(db, document_id)
+        document = get_document_owned_by(db, document_id, user_id)
         if document is None:
             raise FileNotFoundError(f"No document found with id {document_id!r}")
 
@@ -91,7 +95,7 @@ def get_context(
         )
 
     assert corpus_id is not None
-    corpus = get_corpus_or_none(db, corpus_id)
+    corpus = get_corpus_owned_by(db, corpus_id, user_id)
     if corpus is None:
         raise FileNotFoundError(f"No corpus found with id {corpus_id!r}")
 
@@ -171,6 +175,7 @@ def _persist_turn_chunks(
 
 def create_turn(
     db: Session,
+    user_id: str,
     document_id: str | None,
     model: str,
     query: str,
@@ -192,7 +197,7 @@ def create_turn(
         raise UnsupportedModelError(f"Unsupported embedding model: {model!r}")
 
     if document_id is not None:
-        document = get_document_or_none(db, document_id)
+        document = get_document_owned_by(db, document_id, user_id)
         if document is None:
             raise FileNotFoundError(f"No document found with id {document_id!r}")
 
@@ -206,7 +211,7 @@ def create_turn(
             raise NoSavedEmbeddingsError(f"Document has no saved embeddings for model {model!r}")
     else:
         assert corpus_id is not None
-        corpus = get_corpus_or_none(db, corpus_id)
+        corpus = get_corpus_owned_by(db, corpus_id, user_id)
         if corpus is None:
             raise FileNotFoundError(f"No corpus found with id {corpus_id!r}")
 
@@ -271,12 +276,12 @@ def _build_prompt(question: str, chunks: list[ConversationTurnChunk]) -> str:
     )
 
 
-def generate_answer(db: Session, turn_id: str) -> TurnOut:
+def generate_answer(db: Session, user_id: str, turn_id: str) -> TurnOut:
     """Builds the prompt from `turn_id`'s already-persisted question and chunk snapshots (no
     new retrieval — spec FR-014), calls the configured `GenerationProvider`, and persists the
     outcome onto the same turn. Calling this again on a turn whose last attempt failed is the
     retry path (FR-014); it reuses the same chunk snapshots."""
-    turn = get_conversation_turn_or_none(db, turn_id)
+    turn = get_conversation_turn_owned_by(db, turn_id, user_id)
     if turn is None:
         raise TurnNotFoundError(f"No conversation turn found with id {turn_id!r}")
 
@@ -312,14 +317,14 @@ def generate_answer(db: Session, turn_id: str) -> TurnOut:
 
 
 def list_turns(
-    db: Session, document_id: str | None, *, corpus_id: str | None = None
+    db: Session, user_id: str, document_id: str | None, *, corpus_id: str | None = None
 ) -> ListTurnsResponse:
     """A document's or an entire corpus's persisted conversation, oldest first (spec FR-017's
     automatic reload; corpus scope added by 019-metrics-dashboard)."""
     _require_exactly_one_scope(document_id, corpus_id)
 
     if document_id is not None:
-        document = get_document_or_none(db, document_id)
+        document = get_document_owned_by(db, document_id, user_id)
         if document is None:
             raise FileNotFoundError(f"No document found with id {document_id!r}")
         turns = db.execute(
@@ -330,7 +335,7 @@ def list_turns(
         return ListTurnsResponse(documentId=document_id, turns=[_to_turn_out(turn) for turn in turns])
 
     assert corpus_id is not None
-    corpus = get_corpus_or_none(db, corpus_id)
+    corpus = get_corpus_owned_by(db, corpus_id, user_id)
     if corpus is None:
         raise FileNotFoundError(f"No corpus found with id {corpus_id!r}")
     turns = db.execute(

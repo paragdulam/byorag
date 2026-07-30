@@ -1,5 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.auth.dependencies import require_user
+from app.db.models import User
 from app.system import service
 from app.system.schemas import SystemCapacityResponse
 
@@ -7,7 +9,7 @@ router = APIRouter(prefix="/api/system", tags=["system"])
 
 
 @router.get("/capacity", response_model=SystemCapacityResponse)
-def get_capacity() -> SystemCapacityResponse:
+def get_capacity(user: User = Depends(require_user)) -> SystemCapacityResponse:
     hardware = service.get_hardware_profile()
 
     estimate = None

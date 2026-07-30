@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from fastapi.testclient import TestClient
 
 
@@ -28,17 +26,3 @@ def test_get_file_unknown_id_returns_404(client: TestClient) -> None:
 
     assert response.status_code == 404
     assert "no document found" in response.json()["detail"].lower()
-
-
-def test_get_file_missing_on_disk_returns_404(
-    client: TestClient, pdfs_dir: Path, corpus_id: str
-) -> None:
-    document_id = upload_pdf(client, corpus_id, "report.pdf", b"%PDF-1.4 fake pdf contents")
-    for path in pdfs_dir.iterdir():
-        path.unlink()
-
-    response = client.get(f"/api/sources/{document_id}/file")
-
-    assert response.status_code == 404
-    detail = response.json()["detail"].lower()
-    assert "missing" in detail or "unreadable" in detail

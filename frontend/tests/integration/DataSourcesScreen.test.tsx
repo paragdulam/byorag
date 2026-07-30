@@ -10,8 +10,8 @@ import { CorpusProvider } from '../../src/context/CorpusContext'
 // file URL the preview pane was pointed at, without attempting real PDF parsing.
 vi.mock('react-pdf', () => ({
   pdfjs: { GlobalWorkerOptions: {} },
-  Document: (props: { file: string }) => (
-    <div data-testid="mock-pdf-document">{props.file}</div>
+  Document: (props: { file: { url: string } }) => (
+    <div data-testid="mock-pdf-document">{props.file.url}</div>
   ),
   Page: () => null,
 }))

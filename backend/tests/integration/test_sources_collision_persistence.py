@@ -1,23 +1,34 @@
-from pathlib import Path
-
 from fastapi.testclient import TestClient
 
 
-def test_two_sequential_uploads_with_identical_filenames_leave_two_distinct_files(
-    client: TestClient, pdfs_dir: Path, corpus_id: str
+def test_two_sequential_uploads_with_identical_filenames_are_kept_distinct(
+    client: TestClient, corpus_id: str
 ) -> None:
-    client.post(
+    first = client.post(
         "/api/sources",
         data={"corpusId": corpus_id},
         files={"files": ("report.pdf", b"%PDF-1.4 original", "application/pdf")},
     )
-    client.post(
+    second = client.post(
         "/api/sources",
         data={"corpusId": corpus_id},
         files={"files": ("report.pdf", b"%PDF-1.4 replacement", "application/pdf")},
     )
 
-    on_disk = sorted(p.name for p in pdfs_dir.iterdir())
-    assert on_disk == ["report (1).pdf", "report.pdf"]
-    assert (pdfs_dir / "report.pdf").read_bytes() == b"%PDF-1.4 original"
-    assert (pdfs_dir / "report (1).pdf").read_bytes() == b"%PDF-1.4 replacement"
+    first_document = first.json()["documents"][0]
+    second_document = second.json()["documents"][0]
+    assert sorted([first_document["name"], second_document["name"]]) == [
+        "report (1).pdf",
+        "report.pdf",
+    ]
+
+    by_name = {
+        first_document["name"]: first_document["id"],
+        second_document["name"]: second_document["id"],
+    }
+    assert client.get(f"/api/sources/{by_name['report.pdf']}/file").content == (
+        b"%PDF-1.4 original"
+    )
+    assert client.get(f"/api/sources/{by_name['report (1).pdf']}/file").content == (
+        b"%PDF-1.4 replacement"
+    )

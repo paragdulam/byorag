@@ -2,7 +2,16 @@ import uuid
 from datetime import datetime, timezone
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -22,11 +31,52 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class Corpus(Base):
-    __tablename__ = "corpora"
+class User(Base):
+    """A person who can log in (024-user-authentication). Every `Corpus`/`Document`
+    row's ownership traces back to a `User.id`."""
+
+    __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
-    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    email: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+
+class Session(Base):
+    """One logged-in session (024-user-authentication data-model.md). `token` is the
+    opaque bearer credential returned to the client at signup/login; `revoked_at` is
+    null while the session is still active. No `expires_at` — sessions persist until
+    explicit logout (FR-004)."""
+
+    __tablename__ = "sessions"
+
+    token: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped["User"] = relationship()
+
+
+class Corpus(Base):
+    __tablename__ = "corpora"
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_corpus_user_name"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    # Nullable only to tolerate rows that predate this feature — claimed by the first
+    # signup's backfill (024-user-authentication research.md §2-3). Every application-level
+    # read/write treats a null user_id as inaccessible.
+    user_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
@@ -38,11 +88,24 @@ class Corpus(Base):
 
 class Document(Base):
     __tablename__ = "documents"
+    __table_args__ = (
+        UniqueConstraint("user_id", "content_hash", name="uq_document_user_content_hash"),
+    )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    # Denormalized owner, set once at upload time — kept alongside the corpus's own
+    # user_id so per-user queries never need to join through document_corpora/corpora to
+    # find the owner (024-user-authentication research.md §7). Nullable for the same
+    # pre-existing-row reason as Corpus.user_id.
+    user_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String, nullable=False)
-    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    storage_path: Mapped[str] = mapped_column(String, nullable=False)
+    # Content-based dedup (FR-005) is scoped per user, not global — two different users
+    # uploading identical bytes each get their own private Document row (corpora/documents
+    # are strictly private, 024-user-authentication spec.md Clarifications).
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="processed")
     uploaded_at: Mapped[datetime] = mapped_column(

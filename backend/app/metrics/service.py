@@ -1,7 +1,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.lookups import get_corpus_or_none
+from app.db.lookups import get_corpus_owned_by
 from app.db.models import Chunk as ChunkRow
 from app.db.models import ConversationTurn, Corpus, Document, DocumentCorpus
 from app.db.models import Embedding as EmbeddingRow
@@ -33,10 +33,13 @@ class NotEnoughPipelinesError(ValueError):
         super().__init__(f"Corpus '{corpus_id}' has fewer than 2 pipelines to compare")
 
 
-def list_corpora_summary(db: Session) -> ListCorporaResponse:
-    """One entry per corpus with the chunking techniques that have saved chunks — the Metrics
-    screen's corpus list (spec FR-001/FR-002)."""
-    corpora = db.execute(select(Corpus).order_by(Corpus.name)).scalars().all()
+def list_corpora_summary(db: Session, user_id: str) -> ListCorporaResponse:
+    """One entry per corpus owned by `user_id`, with the chunking techniques that have saved
+    chunks — the Metrics screen's corpus list (spec FR-001/FR-002, scoped per user by
+    024-user-authentication)."""
+    corpora = db.execute(
+        select(Corpus).where(Corpus.user_id == user_id).order_by(Corpus.name)
+    ).scalars().all()
 
     summaries = []
     for corpus in corpora:
@@ -61,13 +64,13 @@ def list_corpora_summary(db: Session) -> ListCorporaResponse:
     return ListCorporaResponse(corpora=summaries)
 
 
-def list_pipelines(db: Session, corpus_id: str) -> ListPipelinesResponse:
+def list_pipelines(db: Session, user_id: str, corpus_id: str) -> ListPipelinesResponse:
     """Every `(chunking_strategy, embedding_model)` pipeline for one corpus, each with its own
     chunk count, question/answer counts, scope breakdown, and aggregated quality scores (spec
     FR-002–FR-009; data-model.md "Derived Concept: RAG Pipeline"). A pipeline only appears once
     it has at least one saved embedding — chunking alone (no embeddings yet) isn't a complete
     pipeline, matching `PipelineSummary.embeddingModel` being required, not optional."""
-    corpus = get_corpus_or_none(db, corpus_id)
+    corpus = get_corpus_owned_by(db, corpus_id, user_id)
     if corpus is None:
         raise CorpusNotFoundError(corpus_id)
 

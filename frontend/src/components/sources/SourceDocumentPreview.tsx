@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
-import { sourceFileUrl } from '../../lib/sourcesApi'
+import { sourceFileRequest } from '../../lib/sourcesApi'
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -49,6 +49,16 @@ export function SourceDocumentPreview({
     )
   }
 
+  const containerStyle = {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    overflowX: 'auto', // Adds scrollbars if zoomed PDF exceeds screen width
+    padding: '20px'
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -60,9 +70,9 @@ export function SourceDocumentPreview({
             Preview unavailable for this document.
           </div>
         ) : (
-          <div className="p-4">
+          <div className="p-4" style={containerStyle}>
             <Document
-              file={sourceFileUrl(documentId)}
+              file={sourceFileRequest(documentId)}
               onLoadSuccess={({ numPages: pages }) => setNumPages(pages)}
               onLoadError={() => setLoadError(true)}
               loading={<p className="text-on-surface-variant">Loading preview…</p>}

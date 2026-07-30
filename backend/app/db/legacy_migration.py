@@ -36,18 +36,21 @@ def migrate_legacy_pdfs(db: Session, pdfs_dir: Path) -> int:
         if not path.is_file():
             continue
 
-        content_hash = compute_content_hash(path.read_bytes())
+        file_bytes = path.read_bytes()
+        content_hash = compute_content_hash(file_bytes)
         existing = db.scalar(select(Document).where(Document.content_hash == content_hash))
         if existing is not None:
             continue
 
         corpus = _get_or_create_uncategorized_corpus(db)
 
+        # user_id is left null here — claimed later by the first signup's backfill
+        # (024-user-authentication research.md §3), same as `corpus.user_id` above.
         document = Document(
             name=path.name,
             content_hash=content_hash,
-            storage_path=str(path),
-            size_bytes=path.stat().st_size,
+            content=file_bytes,
+            size_bytes=len(file_bytes),
             status="processed",
         )
         db.add(document)

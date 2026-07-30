@@ -1,3 +1,4 @@
+import { apiFetch, getStoredToken } from './apiClient'
 import type {
   DeletionResult,
   DocumentWithCorpora,
@@ -47,7 +48,7 @@ function toSourceDocument(raw: RawSourceDocument): SourceDocument {
 
 export async function listSources(corpusId: string): Promise<SourceDocument[]> {
   const url = `${SOURCES_ENDPOINT}?corpusId=${encodeURIComponent(corpusId)}`
-  const response = await fetch(url)
+  const response = await apiFetch(url)
   if (!response.ok) {
     throw new Error(`Failed to load sources: ${response.status}`)
   }
@@ -64,8 +65,26 @@ export function sourceFileUrl(documentId: string): string {
   return `${SOURCES_ENDPOINT}/${encodeURIComponent(documentId)}/file`
 }
 
+/**
+ * `react-pdf`'s `<Document file={...}>` accepts this `{ url, httpHeaders }` shape and passes
+ * `httpHeaders` through to `pdfjs`'s own internal fetch — unlike the two `EventSource`-based
+ * streaming endpoints (which can't send headers at all, research.md §5), the PDF viewer can
+ * carry the session token as a normal `Authorization` header instead of a URL query parameter
+ * (024-user-authentication research.md §6).
+ */
+export function sourceFileRequest(documentId: string): {
+  url: string
+  httpHeaders?: Record<string, string>
+} {
+  const token = getStoredToken()
+  return {
+    url: sourceFileUrl(documentId),
+    httpHeaders: token ? { Authorization: `Bearer ${token}` } : undefined,
+  }
+}
+
 export async function listAllSources(): Promise<DocumentWithCorpora[]> {
-  const response = await fetch(ALL_SOURCES_ENDPOINT)
+  const response = await apiFetch(ALL_SOURCES_ENDPOINT)
   if (!response.ok) {
     throw new Error(`Failed to load all sources: ${response.status}`)
   }
@@ -88,7 +107,7 @@ export async function uploadSources(files: File[], corpusId: string): Promise<Up
     formData.append('files', file)
   }
 
-  const response = await fetch(SOURCES_ENDPOINT, {
+  const response = await apiFetch(SOURCES_ENDPOINT, {
     method: 'POST',
     body: formData,
   })
@@ -103,7 +122,7 @@ export async function uploadSources(files: File[], corpusId: string): Promise<Up
 }
 
 export async function attachDocumentToCorpus(documentId: string, corpusId: string): Promise<void> {
-  const response = await fetch(`${SOURCES_ENDPOINT}/${encodeURIComponent(documentId)}/corpora`, {
+  const response = await apiFetch(`${SOURCES_ENDPOINT}/${encodeURIComponent(documentId)}/corpora`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ corpusId }),
@@ -117,7 +136,7 @@ export async function removeDocumentFromCorpus(
   documentId: string,
   corpusId: string,
 ): Promise<void> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${SOURCES_ENDPOINT}/${encodeURIComponent(documentId)}/corpora/${encodeURIComponent(corpusId)}`,
     { method: 'DELETE' },
   )
@@ -131,7 +150,7 @@ interface DeleteSourcesResponse {
 }
 
 export async function deleteSources(ids: string[]): Promise<DeletionResult[]> {
-  const response = await fetch(DELETE_SOURCES_ENDPOINT, {
+  const response = await apiFetch(DELETE_SOURCES_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids }),

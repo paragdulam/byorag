@@ -97,7 +97,7 @@ describe('MetricsScreen technique switching (019-metrics-dashboard US2)', () => 
     stubFetch()
     render(<App />)
 
-    await userEvent.click(screen.getByText('METRICS'))
+    await userEvent.click(await screen.findByText('METRICS'))
 
     await waitFor(() => expect(screen.getByTestId('metrics-technique')).toHaveTextContent('fixed-size'))
     expect(screen.getByTestId('metrics-question-count')).toHaveTextContent('3')

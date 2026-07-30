@@ -1,3 +1,4 @@
+import { apiFetch } from './apiClient'
 import type { CreateTurnRequest, ListTurnsResponse, PlaygroundContext, Turn } from '../types/playground'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
@@ -21,7 +22,7 @@ export async function getPlaygroundContext(
     'documentId' in scope
       ? `documentId=${encodeURIComponent(scope.documentId)}`
       : `corpusId=${encodeURIComponent(scope.corpusId)}`
-  const response = await fetch(`${PLAYGROUND_CONTEXT_ENDPOINT}?${params}`)
+  const response = await apiFetch(`${PLAYGROUND_CONTEXT_ENDPOINT}?${params}`)
 
   if (!response.ok) {
     throw new Error(`Failed to load playground context: ${response.status}`)
@@ -38,7 +39,7 @@ export async function getPlaygroundContext(
  * ever called, so a 422 in practice always means "query too long").
  */
 export async function createTurn(request: CreateTurnRequest): Promise<Turn> {
-  const response = await fetch(PLAYGROUND_TURNS_ENDPOINT, {
+  const response = await apiFetch(PLAYGROUND_TURNS_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
@@ -60,7 +61,7 @@ export async function createTurn(request: CreateTurnRequest): Promise<Turn> {
  * a turn whose last attempt failed is the retry path (FR-014) — no new retrieval happens.
  */
 export async function generateAnswer(turnId: string): Promise<Turn> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${PLAYGROUND_TURNS_ENDPOINT}/${encodeURIComponent(turnId)}/generate`,
     { method: 'POST' },
   )
@@ -81,7 +82,7 @@ export async function listTurns(
     'documentId' in scope
       ? `documentId=${encodeURIComponent(scope.documentId)}`
       : `corpusId=${encodeURIComponent(scope.corpusId)}`
-  const response = await fetch(`${PLAYGROUND_TURNS_ENDPOINT}?${params}`)
+  const response = await apiFetch(`${PLAYGROUND_TURNS_ENDPOINT}?${params}`)
 
   if (!response.ok) {
     throw new Error(`Failed to load conversation: ${response.status}`)
