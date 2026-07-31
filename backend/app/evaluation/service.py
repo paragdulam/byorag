@@ -8,6 +8,7 @@ from app.db.models import ConversationTurn
 from app.db.models import TurnQualityScore as TurnQualityScoreRow
 from app.evaluation.schemas import AggregatedQualityScores
 from app.evaluation.strategies.base import JUDGES
+from app.profile import service as profile_service
 
 # The only registered JUDGES key today, mirroring how `app/playground/service.py` hardcodes
 # "cosine-similarity" as the only registered retrieval strategy rather than exposing it as a
@@ -32,9 +33,18 @@ def score_turn(db: Session, turn_id: str) -> None:
     if judge is None:
         return
 
+    # Same owner-resolution as db/lookups.py::get_conversation_turn_owned_by. No key on
+    # file for the owning user means this turn is skipped (stays unscored) — a missing key
+    # is treated exactly like any other judge failure below, never a shared/other key
+    # (025-user-profile-anthropic-key FR-016, FR-017).
+    owner_id = turn.document.user_id if turn.document is not None else turn.corpus.user_id
+    api_key = profile_service.resolve_decrypted_key(db, owner_id) if owner_id is not None else None
+    if api_key is None:
+        return
+
     try:
         result = judge.score(
-            turn.question, [chunk.content for chunk in turn.chunks], turn.answer
+            turn.question, [chunk.content for chunk in turn.chunks], turn.answer, api_key
         )
     except Exception:
         return

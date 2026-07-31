@@ -59,13 +59,8 @@ class AnthropicJudge:
     research.md Decision 1) — reuses the same provider/config already required for answer
     generation rather than introducing a second LLM dependency."""
 
-    def score(self, question: str, chunks: list[str], answer: str) -> JudgeResult:
-        if not settings.anthropic_api_key:
-            raise JudgeError(
-                "ANTHROPIC_API_KEY is not configured — set it to compute quality scores"
-            )
-
-        client = Anthropic(api_key=settings.anthropic_api_key)
+    def score(self, question: str, chunks: list[str], answer: str, api_key: str) -> JudgeResult:
+        client = Anthropic(api_key=api_key)
         try:
             response = client.messages.create(
                 model=settings.anthropic_model,

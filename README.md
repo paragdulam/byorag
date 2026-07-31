@@ -69,10 +69,11 @@ This runs Postgres (with `pgvector`), the backend (`http://localhost:8000`), and
 frontend (`http://localhost:5173`) together, with named volumes so uploaded PDFs and the
 database survive container restarts.
 
-To enable the Playground and Metrics screens (both call an LLM), set an API key first:
+Set `KEY_ENCRYPTION_SECRET` (any string) before starting — it's used to encrypt each
+user's personal Anthropic API key at rest:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+export KEY_ENCRYPTION_SECRET=some-random-string
 docker compose up --build
 ```
 
@@ -87,7 +88,7 @@ docker run -d --name byorag-postgres -p 5432:5432 \
 # Terminal 1: backend
 cd backend
 uv sync
-PDFS_DIR=./pdfs ANTHROPIC_API_KEY=sk-ant-... uv run uvicorn app.main:app --reload --port 8000
+PDFS_DIR=./pdfs KEY_ENCRYPTION_SECRET=some-random-string uv run uvicorn app.main:app --reload --port 8000
 
 # Terminal 2: frontend
 cd frontend
@@ -104,14 +105,19 @@ there's nothing to upload or browse until you're signed in. The very first accou
 created on a given database automatically claims any pre-existing corpora/documents (e.g.
 if you're upgrading a pre-multi-user install).
 
+To use Playground (chat generation) or Metrics (judge scoring), each user adds their own
+Anthropic API key from the Profile screen (top-right icon) — there is no shared/server-
+wide key. Playground and Metrics stay disabled in the sidebar, with an explanatory
+tooltip, until a personal key is on file.
+
 ### Environment variables (backend)
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `PDFS_DIR` | `./pdfs` | A one-time legacy-import source directory only — any PDFs found here at startup are migrated into the database and claimed by the first account to sign up. Uploaded PDFs are stored directly in Postgres, not on disk, so this is unused in ordinary operation. |
 | `DATABASE_URL` | `postgresql+psycopg://byorag:byorag@localhost:5432/byorag` | Postgres connection string |
-| `ANTHROPIC_API_KEY` | *(none)* | Required for Playground (chat generation) and Metrics (judge scoring) |
-| `ANTHROPIC_MODEL` | `claude-sonnet-5` | Model used for both generation and evaluation |
+| `KEY_ENCRYPTION_SECRET` | *(none)* | Any string; used to encrypt each user's personal Anthropic API key at rest (Profile screen). Required for Playground/Metrics to work for any user. |
+| `ANTHROPIC_MODEL` | `claude-sonnet-5` | Model used for both generation and evaluation, with each user's own key |
 | `GENERATION_PROVIDER` | `anthropic` | Registry key for the active generation provider |
 
 ## Testing

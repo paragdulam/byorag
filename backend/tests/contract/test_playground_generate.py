@@ -11,9 +11,11 @@ class _StubProvider:
         self._result = result
         self._error = error
         self.last_prompt: str | None = None
+        self.last_api_key: str | None = None
 
-    def generate(self, prompt: str) -> GenerationResult:
+    def generate(self, prompt: str, api_key: str) -> GenerationResult:
         self.last_prompt = prompt
+        self.last_api_key = api_key
         if self._error is not None:
             raise self._error
         assert self._result is not None
@@ -116,3 +118,53 @@ def test_generate_retry_after_failure_succeeds_without_new_retrieval(
     body = second.json()
     assert body["answer"] == "Recovered answer."
     assert body["error"] is None
+
+
+def test_generate_uses_the_acting_users_own_key(
+    client: TestClient, corpus_id: str, stub_provider: _StubProvider
+) -> None:
+    """025-user-profile-anthropic-key FR-012 — `client` has `test-anthropic-key` on file
+    by default (conftest.py); confirms it's the value actually passed to the provider."""
+    turn_id = _create_turn(client, corpus_id)
+
+    response = client.post(f"/api/playground/turns/{turn_id}/generate")
+
+    assert response.status_code == 200
+    assert stub_provider.last_api_key == "test-anthropic-key"
+
+
+def test_generate_is_blocked_with_no_personal_key_on_file(
+    client_without_anthropic_key: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """025-user-profile-anthropic-key FR-013 — no shared/server-default key is used as a
+    fallback; the request is rejected outright, before ever reaching the provider."""
+    corpus = client_without_anthropic_key.post("/api/corpora", json={"name": "Keyless Corpus"})
+    corpus_id = corpus.json()["id"]
+    turn_id = _create_turn(client_without_anthropic_key, corpus_id)
+    stub = _StubProvider(result=GenerationResult(model="claude-sonnet-5", answer="unreachable"))
+    monkeypatch.setitem(GENERATION_PROVIDERS, "anthropic", stub)
+
+    response = client_without_anthropic_key.post(f"/api/playground/turns/{turn_id}/generate")
+
+    assert response.status_code == 400
+
+
+def test_generate_is_blocked_again_after_the_key_is_deleted(
+    client: TestClient, corpus_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """025-user-profile-anthropic-key US3 — deleting a previously-working key blocks
+    Generation exactly like a user who never had one; never a fallback to any other key."""
+    stub = _StubProvider(result=GenerationResult(model="claude-sonnet-5", answer="ok"))
+    monkeypatch.setitem(GENERATION_PROVIDERS, "anthropic", stub)
+    turn_id = _create_turn(client, corpus_id)
+    first = client.post(f"/api/playground/turns/{turn_id}/generate")
+    assert first.status_code == 200
+
+    delete_response = client.delete("/api/profile/anthropic-key")
+    assert delete_response.status_code == 204
+
+    second_turn_id = _create_turn(client, corpus_id, "a second question")
+    second = client.post(f"/api/playground/turns/{second_turn_id}/generate")
+
+    assert second.status_code == 400
+    assert stub.last_prompt is not None and "second question" not in stub.last_prompt

@@ -1,6 +1,26 @@
-export function TopBar() {
+export interface TopBarProps {
+  onNavigateToProfile: () => void
+}
+
+export function TopBar({ onNavigateToProfile }: TopBarProps) {
   return (
     <header className="flex items-center justify-end gap-4 border-b border-outline-variant bg-surface px-8 py-4">
+      <button
+        type="button"
+        aria-label="Profile"
+        onClick={onNavigateToProfile}
+        className="rounded p-2 text-on-surface-variant hover:bg-surface-container"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="8" r="3.5" stroke="currentColor" strokeWidth="1.5" />
+          <path
+            d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        </svg>
+      </button>
       <button
         type="button"
         aria-label="Notifications"

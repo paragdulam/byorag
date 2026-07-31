@@ -5,6 +5,21 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DataSourcesScreen } from '../../src/components/sources/DataSourcesScreen'
 import { CorpusProvider } from '../../src/context/CorpusContext'
 
+// AppShell -> SidebarNav reads Anthropic-key status from AuthContext
+// (025-user-profile-anthropic-key) — mocked here since this suite predates it and isn't
+// exercising that gating.
+vi.mock('../../src/context/AuthContext', () => ({
+  useAuth: () => ({
+    currentUser: { id: 'user-1', email: 'person@example.com', createdAt: '2026-07-14T00:00:00Z' },
+    hasAnthropicKey: true,
+    isLoading: false,
+    signup: vi.fn(),
+    login: vi.fn(),
+    logout: vi.fn(),
+    refreshAnthropicKeyStatus: vi.fn(),
+  }),
+}))
+
 // react-pdf/pdfjs needs a real worker + canvas, neither of which jsdom provides — stubbed here
 // (021-sources-chunking-embeddings-refresh) so the split-view tests can assert which document's
 // file URL the preview pane was pointed at, without attempting real PDF parsing.

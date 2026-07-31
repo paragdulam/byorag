@@ -59,6 +59,9 @@ function stubFetch() {
           corpora: [{ id: 'corpus-a', name: 'Corpus A', createdAt: '2026-07-14T00:00:00Z' }],
         })
       }
+      if (href.includes('/api/profile/anthropic-key')) {
+        return jsonResponse({ hasKey: true, maskedKey: '...test' })
+      }
       if (href.includes('/api/system/capacity')) {
         return jsonResponse({
           hardware: {

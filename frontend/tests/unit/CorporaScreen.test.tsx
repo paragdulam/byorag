@@ -4,6 +4,21 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CorporaScreen } from '../../src/components/corpora/CorporaScreen'
 import { CorpusProvider } from '../../src/context/CorpusContext'
 
+// AppShell -> SidebarNav reads Anthropic-key status from AuthContext
+// (025-user-profile-anthropic-key) — mocked here since this suite predates it and isn't
+// exercising that gating.
+vi.mock('../../src/context/AuthContext', () => ({
+  useAuth: () => ({
+    currentUser: { id: 'user-1', email: 'person@example.com', createdAt: '2026-07-14T00:00:00Z' },
+    hasAnthropicKey: true,
+    isLoading: false,
+    signup: vi.fn(),
+    login: vi.fn(),
+    logout: vi.fn(),
+    refreshAnthropicKeyStatus: vi.fn(),
+  }),
+}))
+
 function jsonResponse(body: unknown, status = 200): Response {
   if (status === 204) {
     return new Response(null, { status })

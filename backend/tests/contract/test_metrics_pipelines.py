@@ -9,12 +9,12 @@ from tests.pdf_helpers import make_words_pdf
 
 
 class _StubGenerationProvider:
-    def generate(self, prompt: str) -> GenerationResult:
+    def generate(self, prompt: str, api_key: str) -> GenerationResult:
         return GenerationResult(model="claude-sonnet-5", answer="This is a test document.")
 
 
 class _StubJudge:
-    def score(self, question: str, chunks: list[str], answer: str) -> JudgeResult:
+    def score(self, question: str, chunks: list[str], answer: str, api_key: str) -> JudgeResult:
         return JudgeResult(
             model="claude-sonnet-5",
             scores=QualityScores(

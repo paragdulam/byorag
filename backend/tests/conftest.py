@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 from app.auth import service as auth_service
 from app.config import settings
 from app.db.base import Base, engine, ensure_vector_extension, get_db
+from app.db.models import User, UserAnthropicKey
 from app.main import app
+from app.profile import service as profile_service
 
 
 @pytest.fixture
@@ -75,13 +77,24 @@ def anonymous_client(pdfs_dir: Path, db_session: Session) -> Iterator[TestClient
         app.dependency_overrides.pop(get_db, None)
 
 
-@pytest.fixture
-def client(pdfs_dir: Path, db_session: Session) -> Iterator[TestClient]:
-    """Authenticated by default: creates a test user directly against `db_session`
-    (bypassing a live HTTP round-trip) and attaches its session token to every request, so
-    the large majority of existing tests keep passing unchanged now that every endpoint
-    requires a signed-in user (024-user-authentication research.md §9)."""
+def _give_user_a_key(db_session: Session, user: User, plaintext: str = "test-anthropic-key") -> None:
+    """Inserts a `UserAnthropicKey` row directly (bypassing live Anthropic validation,
+    since this is test setup, not the add-key flow under test) — 025-user-profile-
+    anthropic-key. Encrypted with whatever `settings.key_encryption_secret` the test
+    process happens to have (default `""` still hashes to a valid Fernet key)."""
+    db_session.add(
+        UserAnthropicKey(
+            user_id=user.id,
+            encrypted_key=profile_service.encrypt(plaintext),
+            last_four=plaintext[-4:],
+        )
+    )
+    db_session.commit()
 
+
+def _authenticated_client(
+    db_session: Session, *, with_anthropic_key: bool
+) -> Iterator[TestClient]:
     def _override_get_db() -> Iterator[Session]:
         yield db_session
 
@@ -91,11 +104,34 @@ def client(pdfs_dir: Path, db_session: Session) -> Iterator[TestClient]:
         user = auth_service.create_user(
             db_session, f"test-{uuid.uuid4().hex}@example.com", "hunter22"
         )
+        if with_anthropic_key:
+            _give_user_a_key(db_session, user)
         token = auth_service.create_session(db_session, user.id)
         test_client.headers["Authorization"] = f"Bearer {token}"
         yield test_client
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture
+def client(pdfs_dir: Path, db_session: Session) -> Iterator[TestClient]:
+    """Authenticated by default: creates a test user directly against `db_session`
+    (bypassing a live HTTP round-trip) and attaches its session token to every request, so
+    the large majority of existing tests keep passing unchanged now that every endpoint
+    requires a signed-in user (024-user-authentication research.md §9). Also has a personal
+    Anthropic key on file by default (025-user-profile-anthropic-key), so existing
+    Generation/quality-scoring tests written before that feature keep working unchanged;
+    tests that specifically exercise "no key" behavior use `client_without_anthropic_key`
+    instead."""
+    yield from _authenticated_client(db_session, with_anthropic_key=True)
+
+
+@pytest.fixture
+def client_without_anthropic_key(pdfs_dir: Path, db_session: Session) -> Iterator[TestClient]:
+    """Same as `client`, but the user has no personal Anthropic key on file — for tests
+    exercising the blocked-Generation/skipped-scoring behavior (025-user-profile-anthropic-
+    key FR-013, FR-017)."""
+    yield from _authenticated_client(db_session, with_anthropic_key=False)
 
 
 @pytest.fixture

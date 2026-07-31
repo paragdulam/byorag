@@ -19,6 +19,7 @@ dependencies = [
     "scikit-learn>=1.5",
     "umap-learn>=0.5",
     "bcrypt>=4.2",
+    "cryptography>=43",
 ]
 
 [dependency-groups]

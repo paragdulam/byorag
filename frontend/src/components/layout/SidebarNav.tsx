@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { useAuth } from '../../context/AuthContext'
 import { useCorpus } from '../../context/CorpusContext'
+
+const NO_ANTHROPIC_KEY_MESSAGE = 'Add a personal Anthropic key in your Profile to use this.'
 
 export type ScreenId =
   | 'corpora'
@@ -9,6 +12,7 @@ export type ScreenId =
   | 'vector-view'
   | 'playground'
   | 'metrics'
+  | 'profile'
 
 interface SubNavItem {
   label: string
@@ -19,6 +23,8 @@ interface NavItem {
   label: string
   screen?: ScreenId
   subItems?: SubNavItem[]
+  // Requires a personal Anthropic key on file (025-user-profile-anthropic-key FR-014).
+  requiresAnthropicKey?: boolean
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -32,15 +38,17 @@ const NAV_ITEMS: NavItem[] = [
   },
   { label: 'Embeddings', screen: 'embeddings' },
   { label: 'Vector View', screen: 'vector-view' },
-  { label: 'Playground', screen: 'playground' },
-  { label: 'Metrics', screen: 'metrics' },
+  { label: 'Playground', screen: 'playground', requiresAnthropicKey: true },
+  { label: 'Metrics', screen: 'metrics', requiresAnthropicKey: true },
 ]
 
-const navLinkClassName = (isActive: boolean) =>
+const navLinkClassName = (isActive: boolean, isDisabled = false) =>
   'block rounded px-3 py-2 font-mono text-xs font-medium tracking-widest ' +
-  (isActive
-    ? 'bg-primary-container text-on-primary-container'
-    : 'text-on-surface-variant hover:bg-surface-container')
+  (isDisabled
+    ? 'cursor-not-allowed text-on-surface-variant opacity-40'
+    : isActive
+      ? 'bg-primary-container text-on-primary-container'
+      : 'text-on-surface-variant hover:bg-surface-container')
 
 function ChevronIcon({ expanded }: { expanded: boolean }) {
   return (
@@ -147,6 +155,7 @@ export interface SidebarNavProps {
 
 export function SidebarNav({ activeScreen, onNavigate }: SidebarNavProps) {
   const [expandedLabel, setExpandedLabel] = useState<string | null>(null)
+  const { hasAnthropicKey } = useAuth()
 
   return (
     <nav
@@ -169,6 +178,7 @@ export function SidebarNav({ activeScreen, onNavigate }: SidebarNavProps) {
         {NAV_ITEMS.map((item) => {
           const isActive = item.screen === activeScreen
           const isExpanded = expandedLabel === item.label
+          const isDisabled = Boolean(item.requiresAnthropicKey) && !hasAnthropicKey
 
           return (
             <li key={item.label}>
@@ -176,8 +186,13 @@ export function SidebarNav({ activeScreen, onNavigate }: SidebarNavProps) {
                 href="#"
                 aria-current={isActive ? 'page' : undefined}
                 aria-expanded={item.subItems ? isExpanded : undefined}
+                aria-disabled={isDisabled ? 'true' : undefined}
+                title={isDisabled ? NO_ANTHROPIC_KEY_MESSAGE : undefined}
                 onClick={(event) => {
                   event.preventDefault()
+                  if (isDisabled) {
+                    return
+                  }
                   if (item.subItems) {
                     setExpandedLabel((prev) => (prev === item.label ? null : item.label))
                   } else if (item.screen) {
@@ -186,8 +201,8 @@ export function SidebarNav({ activeScreen, onNavigate }: SidebarNavProps) {
                 }}
                 className={
                   item.subItems
-                    ? navLinkClassName(isActive) + ' flex items-center justify-between gap-2'
-                    : navLinkClassName(isActive)
+                    ? navLinkClassName(isActive, isDisabled) + ' flex items-center justify-between gap-2'
+                    : navLinkClassName(isActive, isDisabled)
                 }
               >
                 {item.subItems ? (

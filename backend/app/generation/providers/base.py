@@ -7,7 +7,7 @@ class GenerationResult(NamedTuple):
 
 
 class GenerationProvider(Protocol):
-    def generate(self, prompt: str) -> "GenerationResult": ...
+    def generate(self, prompt: str, api_key: str) -> "GenerationResult": ...
 
 
 class GenerationError(RuntimeError):

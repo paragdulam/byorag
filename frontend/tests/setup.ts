@@ -31,7 +31,11 @@ beforeEach(() => {
 
       if (url.includes('/api/auth/me')) {
         return new Response(
-          JSON.stringify({ id: 'default-user', email: 'test@example.com' }),
+          JSON.stringify({
+            id: 'default-user',
+            email: 'test@example.com',
+            createdAt: '2026-07-14T00:00:00Z',
+          }),
           { status: 200 },
         )
       }
@@ -45,6 +49,14 @@ beforeEach(() => {
           }),
           { status: 200 },
         )
+      }
+
+      if (url.includes('/api/profile/anthropic-key')) {
+        // Defaults to "has a key" so pre-existing tests that reach Playground/Metrics
+        // through the real nav (not mocking AuthContext) aren't blocked by
+        // 025-user-profile-anthropic-key's gating; tests exercising the gating itself
+        // override this route explicitly.
+        return new Response(JSON.stringify({ hasKey: true, maskedKey: '...test' }), { status: 200 })
       }
 
       if (url.includes('/api/embeddings/models')) {

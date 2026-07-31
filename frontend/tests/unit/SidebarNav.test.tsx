@@ -4,6 +4,24 @@ import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CorpusProvider } from '../../src/context/CorpusContext'
 import { SidebarNav } from '../../src/components/layout/SidebarNav'
+import { useAuth } from '../../src/context/AuthContext'
+
+vi.mock('../../src/context/AuthContext')
+
+const mockedUseAuth = vi.mocked(useAuth)
+
+function mockAuth(overrides: Partial<ReturnType<typeof useAuth>> = {}) {
+  mockedUseAuth.mockReturnValue({
+    currentUser: { id: 'user-1', email: 'person@example.com', createdAt: '2026-07-14T00:00:00Z' },
+    hasAnthropicKey: true,
+    isLoading: false,
+    signup: vi.fn(),
+    login: vi.fn(),
+    logout: vi.fn(),
+    refreshAnthropicKeyStatus: vi.fn(),
+    ...overrides,
+  })
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status })
@@ -29,6 +47,7 @@ function renderWithProvider(ui: ReactNode) {
 
 beforeEach(() => {
   window.localStorage.clear()
+  mockAuth()
 })
 
 describe('SidebarNav', () => {
@@ -344,6 +363,58 @@ describe('SidebarNav', () => {
       )
       // Exactly one "CORPORA" text node should remain: the nav item's label.
       expect(screen.getAllByText('CORPORA')).toHaveLength(1)
+    })
+  })
+
+  describe('Anthropic key gating (025-user-profile-anthropic-key)', () => {
+    it('disables Playground and Metrics with an explanatory tooltip when there is no key', async () => {
+      mockAuth({ hasAnthropicKey: false })
+      stubCorporaFetch([])
+      const onNavigate = vi.fn()
+      renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={onNavigate} />)
+      await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+
+      const playgroundLink = screen.getByText('PLAYGROUND').closest('a') as HTMLElement
+      const metricsLink = screen.getByText('METRICS').closest('a') as HTMLElement
+
+      expect(playgroundLink).toHaveAttribute('aria-disabled', 'true')
+      expect(metricsLink).toHaveAttribute('aria-disabled', 'true')
+      expect(playgroundLink).toHaveAttribute('title', expect.stringMatching(/anthropic key/i))
+      expect(metricsLink).toHaveAttribute('title', expect.stringMatching(/anthropic key/i))
+
+      await userEvent.click(playgroundLink)
+      await userEvent.click(metricsLink)
+      expect(onNavigate).not.toHaveBeenCalled()
+    })
+
+    it('leaves every other nav item enabled when there is no key', async () => {
+      mockAuth({ hasAnthropicKey: false })
+      stubCorporaFetch([])
+      renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
+      await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+
+      for (const label of ['CORPORA', 'SOURCES', 'CHUNKING', 'EMBEDDINGS', 'VECTOR VIEW']) {
+        const link = screen.getByText(label).closest('a') as HTMLElement
+        expect(link).not.toHaveAttribute('aria-disabled')
+      }
+    })
+
+    it('enables Playground and Metrics, with no tooltip, once a key is on file', async () => {
+      mockAuth({ hasAnthropicKey: true })
+      stubCorporaFetch([])
+      const onNavigate = vi.fn()
+      renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={onNavigate} />)
+      await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+
+      const playgroundLink = screen.getByText('PLAYGROUND').closest('a') as HTMLElement
+      const metricsLink = screen.getByText('METRICS').closest('a') as HTMLElement
+
+      expect(playgroundLink).not.toHaveAttribute('aria-disabled')
+      expect(metricsLink).not.toHaveAttribute('aria-disabled')
+      expect(playgroundLink).not.toHaveAttribute('title')
+
+      await userEvent.click(playgroundLink)
+      expect(onNavigate).toHaveBeenCalledWith('playground')
     })
   })
 })

@@ -10,7 +10,9 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 def _to_auth_response(user: User, token: str) -> AuthResponse:
-    return AuthResponse(user=UserResponse(id=user.id, email=user.email), token=token)
+    return AuthResponse(
+        user=UserResponse(id=user.id, email=user.email, createdAt=user.created_at), token=token
+    )
 
 
 @router.post("/signup", response_model=AuthResponse, status_code=201)
@@ -56,4 +58,4 @@ def me(
     user = service.resolve_session(db, token) if token is not None else None
     if user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    return UserResponse(id=user.id, email=user.email)
+    return UserResponse(id=user.id, email=user.email, createdAt=user.created_at)

@@ -90,3 +90,20 @@ def test_me_returns_user_for_valid_token_and_401_otherwise(
 
     invalid = client.get("/api/auth/me", headers={"Authorization": "Bearer not-a-real-token"})
     assert invalid.status_code == 401
+
+
+def test_me_and_signup_and_login_responses_include_created_at(client: TestClient) -> None:
+    signup = client.post(
+        "/api/auth/signup", json={"email": "created-at@example.com", "password": "hunter22"}
+    )
+    assert isinstance(signup.json()["user"]["createdAt"], str) and signup.json()["user"]["createdAt"]
+
+    token = signup.json()["token"]
+    me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200
+    assert me.json()["createdAt"] == signup.json()["user"]["createdAt"]
+
+    login = client.post(
+        "/api/auth/login", json={"email": "created-at@example.com", "password": "hunter22"}
+    )
+    assert login.json()["user"]["createdAt"] == signup.json()["user"]["createdAt"]

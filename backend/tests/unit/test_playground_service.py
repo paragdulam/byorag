@@ -7,13 +7,28 @@ from app.db.models import Chunk as ChunkRow
 from app.db.models import ConversationTurn
 from app.db.models import Document
 from app.db.models import Embedding as EmbeddingRow
+from app.db.models import UserAnthropicKey
 from app.generation.providers.base import GENERATION_PROVIDERS, GenerationError, GenerationResult
 from app.playground import service
+from app.profile import service as profile_service
 
 
 @pytest.fixture
 def user_id(db_session: Session) -> str:
-    return auth_service.create_user(db_session, "playground-owner@example.com", "hunter22").id
+    """Has a personal Anthropic key on file by default (025-user-profile-anthropic-key)
+    so pre-existing generate_answer tests keep exercising the provider/error paths they
+    were written for; `test_generate_answer_requires_a_personal_anthropic_key` below covers
+    the no-key path specifically."""
+    user = auth_service.create_user(db_session, "playground-owner@example.com", "hunter22")
+    db_session.add(
+        UserAnthropicKey(
+            user_id=user.id,
+            encrypted_key=profile_service.encrypt("test-anthropic-key"),
+            last_four="test-anthropic-key"[-4:],
+        )
+    )
+    db_session.commit()
+    return user.id
 
 
 def _make_document(db_session: Session, user_id: str, name: str = "doc.pdf") -> Document:
@@ -197,6 +212,24 @@ def test_generate_answer_rejects_a_turn_with_no_chunks(db_session: Session, user
         service.generate_answer(db_session, user_id, turn.id)
 
 
+def test_generate_answer_raises_when_the_user_has_no_anthropic_key(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """025-user-profile-anthropic-key FR-013 — a user with no personal key is blocked,
+    never falling back to any shared/other key. Uses a fresh user (not the `user_id`
+    fixture, which has a key by default)."""
+    keyless_user = auth_service.create_user(db_session, "playground-keyless@example.com", "hunter22")
+    document = _make_document_with_saved_embedding(db_session, keyless_user.id)
+    db_session.commit()
+    turn_out = service.create_turn(db_session, keyless_user.id, document.id, "bert", "a query")
+
+    stub = _StubProvider(result=GenerationResult(model="claude-sonnet-5", answer="unreachable"))
+    monkeypatch.setitem(GENERATION_PROVIDERS, "anthropic", stub)
+
+    with pytest.raises(service.NoApiKeyError):
+        service.generate_answer(db_session, keyless_user.id, turn_out.id)
+
+
 def test_list_turns_unknown_document_raises_not_found(db_session: Session, user_id: str) -> None:
     with pytest.raises(FileNotFoundError):
         service.list_turns(db_session, user_id, "00000000-0000-0000-0000-000000000000")
@@ -234,7 +267,7 @@ class _StubProvider:
         self._result = result
         self._error = error
 
-    def generate(self, prompt: str) -> GenerationResult:
+    def generate(self, prompt: str, api_key: str) -> GenerationResult:
         if self._error is not None:
             raise self._error
         assert self._result is not None

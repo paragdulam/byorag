@@ -18,9 +18,9 @@ services:
     environment:
       PDFS_DIR: /data/pdfs
       DATABASE_URL: postgresql+psycopg://byorag:byorag@postgres:5432/byorag
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GENERATION_PROVIDER: ${GENERATION_PROVIDER:-anthropic}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5}
+      KEY_ENCRYPTION_SECRET: ${KEY_ENCRYPTION_SECRET:-}
     volumes:
       - pdfs_data:/data/pdfs
     depends_on:

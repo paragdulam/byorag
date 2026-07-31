@@ -6,6 +6,7 @@ import { VectorViewScreen } from '../components/vector-view/VectorViewScreen'
 import { PlaygroundScreen } from '../components/playground/PlaygroundScreen'
 import { CorporaScreen } from '../components/corpora/CorporaScreen'
 import { MetricsScreen } from '../components/metrics/MetricsScreen'
+import { ProfileScreen } from '../components/profile/ProfileScreen'
 import type { ScreenId } from '../components/layout/SidebarNav'
 import { CorpusProvider } from '../context/CorpusContext'
 import { AuthProvider, useAuth } from '../context/AuthContext'
@@ -29,6 +30,8 @@ function AuthenticatedApp() {
         <PlaygroundScreen onNavigate={setActiveScreen} />
       ) : activeScreen === 'metrics' ? (
         <MetricsScreen onNavigate={setActiveScreen} />
+      ) : activeScreen === 'profile' ? (
+        <ProfileScreen onNavigate={setActiveScreen} />
       ) : (
         <DataSourcesScreen onNavigate={setActiveScreen} />
       )}

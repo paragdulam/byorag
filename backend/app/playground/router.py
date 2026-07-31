@@ -79,6 +79,8 @@ def generate_answer(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except service.NoRetrievedChunksError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except service.NoApiKeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except service.GenerationFailedError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

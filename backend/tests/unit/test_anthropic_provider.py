@@ -39,8 +39,7 @@ class _FakeAnthropicClient:
 
 
 @pytest.fixture(autouse=True)
-def _configured_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
+def _configured_model(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5")
 
 
@@ -53,21 +52,15 @@ def test_generate_returns_text_and_model_from_a_successful_response(monkeypatch:
     )
 
     provider = AnthropicProvider()
-    result = provider.generate("Answer using only the context below...\n\nQuestion: refund policy?")
+    result = provider.generate(
+        "Answer using only the context below...\n\nQuestion: refund policy?", api_key="test-key"
+    )
 
     assert result.answer == "Refunds take 5 days."
     assert result.model == "claude-sonnet-5"
     assert fake_messages.last_call["messages"] == [
         {"role": "user", "content": "Answer using only the context below...\n\nQuestion: refund policy?"}
     ]
-
-
-def test_generate_raises_generation_error_when_api_key_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "anthropic_api_key", "")
-
-    provider = AnthropicProvider()
-    with pytest.raises(GenerationError):
-        provider.generate("some prompt")
 
 
 def test_generate_raises_generation_error_when_the_api_call_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -79,7 +72,7 @@ def test_generate_raises_generation_error_when_the_api_call_fails(monkeypatch: p
 
     provider = AnthropicProvider()
     with pytest.raises(GenerationError):
-        provider.generate("some prompt")
+        provider.generate("some prompt", api_key="test-key")
 
 
 def test_generate_raises_generation_error_on_an_empty_response(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -92,4 +85,4 @@ def test_generate_raises_generation_error_on_an_empty_response(monkeypatch: pyte
 
     provider = AnthropicProvider()
     with pytest.raises(GenerationError):
-        provider.generate("some prompt")
+        provider.generate("some prompt", api_key="test-key")

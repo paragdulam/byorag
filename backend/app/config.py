@@ -16,8 +16,11 @@ class Settings:
         self.pdfs_dir = Path(os.environ.get("PDFS_DIR", "./pdfs")).resolve()
         self.database_url = os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
         self.generation_provider = os.environ.get("GENERATION_PROVIDER", DEFAULT_GENERATION_PROVIDER)
-        self.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         self.anthropic_model = os.environ.get("ANTHROPIC_MODEL", DEFAULT_ANTHROPIC_MODEL)
+        # Keys a per-user Fernet cipher for encrypting/decrypting each user's personal
+        # Anthropic API key at rest (025-user-profile-anthropic-key research.md §1) — any
+        # string works, it's hashed into a valid 32-byte Fernet key by app/profile/service.py.
+        self.key_encryption_secret = os.environ.get("KEY_ENCRYPTION_SECRET", "")
 
 
 settings = Settings()

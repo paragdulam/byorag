@@ -7,7 +7,7 @@ from tests.pdf_helpers import make_words_pdf
 
 
 class _StubProvider:
-    def generate(self, prompt: str) -> GenerationResult:
+    def generate(self, prompt: str, api_key: str) -> GenerationResult:
         return GenerationResult(model="claude-sonnet-5", answer="The persisted answer.")
 
 

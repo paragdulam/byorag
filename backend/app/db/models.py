@@ -65,6 +65,35 @@ class Session(Base):
     user: Mapped["User"] = relationship()
 
 
+class UserAnthropicKey(Base):
+    """A user's personal Anthropic API key (025-user-profile-anthropic-key data-model.md).
+    At most one per user — `user_id` is unique, so adding/updating is always an upsert of
+    this single row, never a second one. `encrypted_key` holds `Fernet` ciphertext
+    (`app/profile/service.py`), reversible (unlike `User.password_hash`) since the
+    plaintext key must be recoverable to call Anthropic on the user's behalf.
+    `last_four` exists purely so the UI can show a masked form without ever decrypting
+    the key just to display it."""
+
+    __tablename__ = "user_anthropic_keys"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    encrypted_key: Mapped[str] = mapped_column(Text, nullable=False)
+    last_four: Mapped[str] = mapped_column(String(4), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+
 class Corpus(Base):
     __tablename__ = "corpora"
     __table_args__ = (UniqueConstraint("user_id", "name", name="uq_corpus_user_name"),)

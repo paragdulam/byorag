@@ -6,6 +6,7 @@ const AUTH_ENDPOINT = `${API_BASE_URL}/api/auth`
 export interface AuthUser {
   id: string
   email: string
+  createdAt: string
 }
 
 export interface AuthResult {

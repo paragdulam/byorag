@@ -39,8 +39,7 @@ class _FakeAnthropicClient:
 
 
 @pytest.fixture(autouse=True)
-def _configured_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
+def _configured_model(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5")
 
 
@@ -65,7 +64,7 @@ def test_score_parses_a_well_formed_json_response(monkeypatch: pytest.MonkeyPatc
     fake_messages = _stub_response(json.dumps(_VALID_SCORES), monkeypatch)
 
     judge = AnthropicJudge()
-    result = judge.score("What is the refund policy?", ["Refunds within 5 days."], "5 days.")
+    result = judge.score("What is the refund policy?", ["Refunds within 5 days."], "5 days.", api_key="test-key")
 
     assert result.scores.contextPrecision == 0.8
     assert result.scores.contextRecall == 0.7
@@ -84,7 +83,7 @@ def test_score_returns_the_actual_model_name_from_the_response(monkeypatch: pyte
     )
 
     judge = AnthropicJudge()
-    result = judge.score("q", ["c"], "a")
+    result = judge.score("q", ["c"], "a", api_key="test-key")
 
     assert result.model == "claude-opus-4-8"
 
@@ -93,7 +92,7 @@ def test_score_extracts_json_embedded_in_surrounding_prose(monkeypatch: pytest.M
     _stub_response(f"Here are the scores:\n{json.dumps(_VALID_SCORES)}\nHope that helps!", monkeypatch)
 
     judge = AnthropicJudge()
-    result = judge.score("q", ["c"], "a")
+    result = judge.score("q", ["c"], "a", api_key="test-key")
 
     assert result.scores.faithfulness == 0.95
 
@@ -103,7 +102,7 @@ def test_score_raises_judge_error_on_non_json_response(monkeypatch: pytest.Monke
 
     judge = AnthropicJudge()
     with pytest.raises(JudgeError):
-        judge.score("q", ["c"], "a")
+        judge.score("q", ["c"], "a", api_key="test-key")
 
 
 def test_score_raises_judge_error_when_a_field_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -113,7 +112,7 @@ def test_score_raises_judge_error_when_a_field_is_missing(monkeypatch: pytest.Mo
 
     judge = AnthropicJudge()
     with pytest.raises(JudgeError):
-        judge.score("q", ["c"], "a")
+        judge.score("q", ["c"], "a", api_key="test-key")
 
 
 def test_score_raises_judge_error_when_a_value_is_out_of_range(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -122,15 +121,7 @@ def test_score_raises_judge_error_when_a_value_is_out_of_range(monkeypatch: pyte
 
     judge = AnthropicJudge()
     with pytest.raises(JudgeError):
-        judge.score("q", ["c"], "a")
-
-
-def test_score_raises_judge_error_when_api_key_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "anthropic_api_key", "")
-
-    judge = AnthropicJudge()
-    with pytest.raises(JudgeError):
-        judge.score("q", ["c"], "a")
+        judge.score("q", ["c"], "a", api_key="test-key")
 
 
 def test_score_raises_judge_error_when_the_api_call_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,4 +133,4 @@ def test_score_raises_judge_error_when_the_api_call_fails(monkeypatch: pytest.Mo
 
     judge = AnthropicJudge()
     with pytest.raises(JudgeError):
-        judge.score("q", ["c"], "a")
+        judge.score("q", ["c"], "a", api_key="test-key")

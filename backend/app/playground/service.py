@@ -21,6 +21,7 @@ from app.playground.schemas import (
     TurnChunkOut,
     TurnOut,
 )
+from app.profile import service as profile_service
 from app.retrieval.strategies.base import DEFAULT_RETRIEVAL_STRATEGY, RETRIEVAL_STRATEGIES
 
 TOP_K = 5
@@ -47,6 +48,10 @@ class TurnNotFoundError(ValueError):
 
 
 class NoRetrievedChunksError(ValueError):
+    pass
+
+
+class NoApiKeyError(ValueError):
     pass
 
 
@@ -288,6 +293,12 @@ def generate_answer(db: Session, user_id: str, turn_id: str) -> TurnOut:
     if not turn.chunks:
         raise NoRetrievedChunksError("No retrieved chunks to generate an answer from")
 
+    api_key = profile_service.resolve_decrypted_key(db, user_id)
+    if api_key is None:
+        raise NoApiKeyError(
+            "No personal Anthropic API key on file — add one in your Profile to generate answers"
+        )
+
     prompt = _build_prompt(turn.question, turn.chunks)
     provider_key = settings.generation_provider
     provider = GENERATION_PROVIDERS.get(provider_key)
@@ -302,7 +313,7 @@ def generate_answer(db: Session, user_id: str, turn_id: str) -> TurnOut:
         raise GenerationFailedError(turn.error)
 
     try:
-        result = provider.generate(prompt)
+        result = provider.generate(prompt, api_key)
     except GenerationError as exc:
         turn.error = str(exc)
         db.commit()
