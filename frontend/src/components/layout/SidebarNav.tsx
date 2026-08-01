@@ -32,9 +32,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Sources', screen: 'sources' },
   {
     label: 'Chunking',
-    subItems: [
-      { label: 'Fixed Size Chunking', screen: 'fixed-size-chunking' },
-    ],
+    subItems: [{ label: 'Fixed Size Chunking', screen: 'fixed-size-chunking' }],
   },
   { label: 'Embeddings', screen: 'embeddings' },
   { label: 'Vector View', screen: 'vector-view' },
@@ -61,7 +59,8 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
       strokeLinecap="round"
       strokeLinejoin="round"
       className={
-        'h-3 w-3 shrink-0 transition-transform duration-150 ' + (expanded ? 'rotate-90' : 'rotate-0')
+        'h-3 w-3 shrink-0 transition-transform duration-150 ' +
+        (expanded ? 'rotate-90' : 'rotate-0')
       }
       aria-hidden="true"
     >
@@ -112,7 +111,9 @@ function CorporaSection() {
         onClick={() => setIsOpen((prev) => !prev)}
         className="flex w-full items-center justify-between gap-2 rounded px-3 py-2 font-mono text-xs font-medium tracking-widest text-on-surface hover:bg-surface-container"
       >
-        <span className="truncate uppercase">{toggleLabel}</span>
+        <span style={{textAlign: "left", textWrap: "auto", textTransform: "uppercase"}}>
+          {toggleLabel}
+        </span>
         <ChevronIcon expanded={isOpen} />
       </button>
 
@@ -134,7 +135,9 @@ function CorporaSection() {
                     data-testid={`dropdown-corpus-row-${corpus.id}`}
                     aria-current={isActive ? 'page' : undefined}
                     onClick={() => selectCorpus(corpus.id)}
-                    className={navLinkClassName(isActive) + ' block w-full truncate text-left uppercase'}
+                    className={
+                      navLinkClassName(isActive) + ' block w-full truncate text-left uppercase'
+                    }
                   >
                     {corpus.name}
                   </button>
@@ -201,7 +204,8 @@ export function SidebarNav({ activeScreen, onNavigate }: SidebarNavProps) {
                 }}
                 className={
                   item.subItems
-                    ? navLinkClassName(isActive, isDisabled) + ' flex items-center justify-between gap-2'
+                    ? navLinkClassName(isActive, isDisabled) +
+                      ' flex items-center justify-between gap-2'
                     : navLinkClassName(isActive, isDisabled)
                 }
               >

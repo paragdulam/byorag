@@ -426,3 +426,85 @@ describe('DataSourcesScreen PDF preview fullscreen (023-pdf-fullscreen-chunk-vie
     expect(screen.getByTestId('sources-right-pane').className).toMatch(/w-1\/2/)
   })
 })
+
+describe('DataSourcesScreen PDF preview zoom (026-pdf-preview-zoom-pan)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function stubFetch() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const href = url.toString()
+        if (href.includes('/api/corpora')) {
+          return jsonResponse({
+            corpora: [{ id: 'corpus-a', name: 'Corpus A', createdAt: '2026-07-14T00:00:00Z' }],
+          })
+        }
+        if (href.includes('/api/system/capacity')) {
+          return jsonResponse({
+            hardware: {
+              processorName: 'Test Processor',
+              cpuCores: 8,
+              totalMemoryGb: 16.0,
+              gpuDetected: false,
+              gpuName: null,
+              detectionFailed: false,
+            },
+            estimate: null,
+          })
+        }
+        return jsonResponse({
+          documents: [
+            { id: 'doc-a', name: 'a.pdf', sizeBytes: 10, uploadedAt: '2026-07-14T01:00:00Z', status: 'processed' },
+          ],
+          rejections: [],
+        })
+      }),
+    )
+  }
+
+  it('renders working zoom controls in the normal split view', async () => {
+    stubFetch()
+
+    render(<DataSourcesScreen onNavigate={vi.fn()} />)
+    expect(await screen.findByText('a.pdf')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'a.pdf' }))
+
+    expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('100%')
+    await userEvent.click(screen.getByTestId('source-preview-zoom-in'))
+    expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('125%')
+  })
+
+  it('renders working zoom controls in fullscreen too', async () => {
+    stubFetch()
+
+    render(<DataSourcesScreen onNavigate={vi.fn()} />)
+    expect(await screen.findByText('a.pdf')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'a.pdf' }))
+    await userEvent.click(screen.getByTestId('source-preview-fullscreen-toggle'))
+
+    expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('100%')
+    await userEvent.click(screen.getByTestId('source-preview-zoom-in'))
+    expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('125%')
+  })
+
+  it('does not reset the zoom level when toggling fullscreen on and off', async () => {
+    stubFetch()
+
+    render(<DataSourcesScreen onNavigate={vi.fn()} />)
+    expect(await screen.findByText('a.pdf')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'a.pdf' }))
+
+    await userEvent.click(screen.getByTestId('source-preview-zoom-in'))
+    await userEvent.click(screen.getByTestId('source-preview-zoom-in'))
+    expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('150%')
+
+    await userEvent.click(screen.getByTestId('source-preview-fullscreen-toggle'))
+    expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('150%')
+
+    await userEvent.click(screen.getByTestId('source-preview-fullscreen-toggle'))
+    expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('150%')
+  })
+})

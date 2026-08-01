@@ -1,6 +1,6 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SourceDocumentPreview } from '../../src/components/sources/SourceDocumentPreview'
 
 interface MockDocumentProps {
@@ -11,6 +11,7 @@ interface MockDocumentProps {
 }
 
 let latestDocumentProps: MockDocumentProps | null = null
+let pageRenders: { pageNumber: number; scale?: number }[] = []
 
 vi.mock('react-pdf', () => ({
   pdfjs: { GlobalWorkerOptions: {} },
@@ -18,10 +19,16 @@ vi.mock('react-pdf', () => ({
     latestDocumentProps = props
     return <div data-testid="mock-pdf-document">{props.children}</div>
   },
-  Page: ({ pageNumber }: { pageNumber: number }) => (
-    <div data-testid="mock-pdf-page">Page {pageNumber}</div>
-  ),
+  Page: ({ pageNumber, scale }: { pageNumber: number; scale?: number }) => {
+    pageRenders.push({ pageNumber, scale })
+    return <div data-testid="mock-pdf-page">Page {pageNumber}</div>
+  },
 }))
+
+beforeEach(() => {
+  latestDocumentProps = null
+  pageRenders = []
+})
 
 describe('SourceDocumentPreview (021-sources-chunking-embeddings-refresh US2)', () => {
   it('shows an empty placeholder when no document is selected', () => {
@@ -119,5 +126,162 @@ describe('SourceDocumentPreview — fullscreen toggle (023-pdf-fullscreen-chunk-
     })
 
     expect(screen.getAllByTestId('mock-pdf-page')).toHaveLength(3)
+  })
+})
+
+describe('SourceDocumentPreview — zoom in (026-pdf-preview-zoom-pan US1)', () => {
+  it('shows a zoom level of 100% by default', () => {
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+
+    expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('100%')
+  })
+
+  it('increases the zoom level and the scale passed to Page when zoom-in is clicked', async () => {
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+    act(() => {
+      latestDocumentProps?.onLoadSuccess?.({ numPages: 1 })
+    })
+
+    await userEvent.click(screen.getByTestId('source-preview-zoom-in'))
+
+    expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('125%')
+    expect(pageRenders.at(-1)?.scale).toBe(1.25)
+  })
+
+  it('disables zoom-in once the maximum zoom level (400%) is reached', async () => {
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+    const zoomInButton = screen.getByTestId('source-preview-zoom-in')
+
+    for (let i = 0; i < 20; i++) {
+      await userEvent.click(zoomInButton)
+    }
+
+    expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('400%')
+    expect(zoomInButton).toBeDisabled()
+  })
+})
+
+describe('SourceDocumentPreview — pan while zoomed (026-pdf-preview-zoom-pan US2)', () => {
+  function setScrollable(element: HTMLElement) {
+    Object.defineProperty(element, 'scrollLeft', { value: 0, writable: true })
+    Object.defineProperty(element, 'scrollTop', { value: 0, writable: true })
+  }
+
+  it('pans the scroll container via pointer drag once zoomed in', async () => {
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+    await userEvent.click(screen.getByTestId('source-preview-zoom-in'))
+
+    const scrollArea = screen.getByTestId('source-preview-scroll-area')
+    setScrollable(scrollArea)
+
+    fireEvent.pointerDown(scrollArea, { clientX: 100, clientY: 100, pointerId: 1 })
+    fireEvent.pointerMove(scrollArea, { clientX: 60, clientY: 70, pointerId: 1 })
+    fireEvent.pointerUp(scrollArea, { pointerId: 1 })
+
+    expect(scrollArea.scrollLeft).toBe(40)
+    expect(scrollArea.scrollTop).toBe(30)
+  })
+
+  it('does not pan on drag while at the default (unzoomed) level', () => {
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+
+    const scrollArea = screen.getByTestId('source-preview-scroll-area')
+    setScrollable(scrollArea)
+
+    fireEvent.pointerDown(scrollArea, { clientX: 100, clientY: 100, pointerId: 1 })
+    fireEvent.pointerMove(scrollArea, { clientX: 60, clientY: 70, pointerId: 1 })
+    fireEvent.pointerUp(scrollArea, { pointerId: 1 })
+
+    expect(scrollArea.scrollLeft).toBe(0)
+    expect(scrollArea.scrollTop).toBe(0)
+  })
+
+  it('disables pointer events on the page content — pan wins over text selection — once zoomed in', async () => {
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+
+    const pageContent = screen.getByTestId('source-preview-page-content')
+    expect(pageContent).not.toHaveStyle({ pointerEvents: 'none' })
+
+    await userEvent.click(screen.getByTestId('source-preview-zoom-in'))
+
+    expect(pageContent).toHaveStyle({ pointerEvents: 'none' })
+  })
+})
+
+describe('SourceDocumentPreview — return to default view (026-pdf-preview-zoom-pan US3)', () => {
+  it('decreases the zoom level when zoom-out is clicked and stops at 100%', async () => {
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+
+    await userEvent.click(screen.getByTestId('source-preview-zoom-in'))
+    await userEvent.click(screen.getByTestId('source-preview-zoom-in'))
+    expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('150%')
+
+    const zoomOutButton = screen.getByTestId('source-preview-zoom-out')
+    await userEvent.click(zoomOutButton)
+    expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('125%')
+
+    await userEvent.click(zoomOutButton)
+    expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('100%')
+    expect(zoomOutButton).toBeDisabled()
+  })
+
+  it('disables zoom-out at the default (100%) zoom level', () => {
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+
+    expect(screen.getByTestId('source-preview-zoom-out')).toBeDisabled()
+  })
+
+  it('resets to exactly 100% in one click from any zoom level', async () => {
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+
+    const zoomInButton = screen.getByTestId('source-preview-zoom-in')
+    await userEvent.click(zoomInButton)
+    await userEvent.click(zoomInButton)
+    await userEvent.click(zoomInButton)
+    expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('175%')
+
+    await userEvent.click(screen.getByTestId('source-preview-zoom-reset'))
+
+    expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('100%')
+  })
+})
+
+describe('SourceDocumentPreview — zoom persists across pages (026-pdf-preview-zoom-pan US2, FR-009)', () => {
+  it('applies the same scale to every rendered page', async () => {
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+    act(() => {
+      latestDocumentProps?.onLoadSuccess?.({ numPages: 3 })
+    })
+
+    await userEvent.click(screen.getByTestId('source-preview-zoom-in'))
+
+    const lastScalePerPage = new Map<number, number | undefined>()
+    for (const pageRender of pageRenders) {
+      lastScalePerPage.set(pageRender.pageNumber, pageRender.scale)
+    }
+
+    expect(lastScalePerPage.get(1)).toBe(1.25)
+    expect(lastScalePerPage.get(2)).toBe(1.25)
+    expect(lastScalePerPage.get(3)).toBe(1.25)
   })
 })
