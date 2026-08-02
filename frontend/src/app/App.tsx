@@ -4,6 +4,7 @@ import { FixedSizeChunkingScreen } from '../components/chunking/FixedSizeChunkin
 import { EmbeddingsScreen } from '../components/embeddings/EmbeddingsScreen'
 import { VectorViewScreen } from '../components/vector-view/VectorViewScreen'
 import { PlaygroundScreen } from '../components/playground/PlaygroundScreen'
+import { GoldenDatasetScreen } from '../components/golden-dataset/GoldenDatasetScreen'
 import { CorporaScreen } from '../components/corpora/CorporaScreen'
 import { MetricsScreen } from '../components/metrics/MetricsScreen'
 import { ProfileScreen } from '../components/profile/ProfileScreen'
@@ -26,6 +27,8 @@ function AuthenticatedApp() {
         <EmbeddingsScreen onNavigate={setActiveScreen} />
       ) : activeScreen === 'vector-view' ? (
         <VectorViewScreen onNavigate={setActiveScreen} />
+      ) : activeScreen === 'golden-dataset' ? (
+        <GoldenDatasetScreen onNavigate={setActiveScreen} />
       ) : activeScreen === 'playground' ? (
         <PlaygroundScreen onNavigate={setActiveScreen} />
       ) : activeScreen === 'metrics' ? (

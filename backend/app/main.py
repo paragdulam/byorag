@@ -11,6 +11,7 @@ from app.db.base import Base, SessionLocal, check_database_connection, engine, e
 from app.db.legacy_migration import migrate_legacy_pdfs
 from app.db.schema_migrations import ensure_schema_migrations
 from app.embeddings.router import router as embeddings_router
+from app.golden_dataset.router import router as golden_dataset_router
 from app.metrics.router import router as metrics_router
 from app.playground.router import router as playground_router
 from app.profile.router import router as profile_router
@@ -49,5 +50,6 @@ app.include_router(system_router)
 app.include_router(chunking_router)
 app.include_router(embeddings_router)
 app.include_router(playground_router)
+app.include_router(golden_dataset_router)
 app.include_router(metrics_router)
 app.include_router(profile_router)

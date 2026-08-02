@@ -314,6 +314,99 @@ class ConversationTurnChunk(Base):
     turn: Mapped["ConversationTurn"] = relationship(back_populates="chunks")
 
 
+class GoldenDatasetEntry(Base):
+    """A reference record — question + preferred answer + evidence chunks — for evaluating
+    the RAG pipeline (027-golden-dataset). Scoped to a corpus, and optionally to one specific
+    document within it. `source` distinguishes manual (SME-authored, always created as
+    "approved") from `llm_generated` (always created as "pending_review" — FR-011, never
+    usable until a human explicitly approves it, data-model.md's state diagram). `status` can
+    move freely between all three values via the shared editor — rejection is not terminal
+    (FR-013a).
+
+    `document_id`/`corpus_id` both use `ondelete="CASCADE"` — a deliberate departure from
+    `ConversationTurnChunk`'s softer `SET NULL` pattern below, since spec FR-019 requires
+    golden entries to be deleted (not orphaned) when their source document is removed
+    (research.md §6).
+    """
+
+    __tablename__ = "golden_dataset_entries"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    corpus_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("corpora.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    preferred_answer: Mapped[str] = mapped_column(Text, nullable=False)
+    # "manual" | "llm_generated" — plain string, validated at the service layer, matching this
+    # codebase's existing convention for such fields (e.g. ConversationTurn.scope) rather than
+    # a native Postgres enum.
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    # "approved" | "pending_review" | "rejected"
+    status: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+    # Set the first time status leaves "pending_review" (approved or rejected); left null for
+    # entries that were manual from the start, since they were never reviewed in that sense.
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    chunks: Mapped[list["GoldenDatasetEntryChunk"]] = relationship(
+        back_populates="entry",
+        cascade="all, delete-orphan",
+        order_by="GoldenDatasetEntryChunk.position",
+    )
+
+
+class GoldenDatasetEntryChunk(Base):
+    """A snapshot of one evidence chunk selected for a `GoldenDatasetEntry` (027-golden-dataset
+    data-model.md) — mirrors `ConversationTurnChunk`'s field split (hard FK to parent /
+    soft-linkable source ref / snapshot content / display order), but `entry_id` cascades a
+    delete of its own snapshot rows, and the entry's `document_id`/`corpus_id` cascade instead
+    of soft-linking (see `GoldenDatasetEntry`'s docstring). `content`/`chunk_index` are the
+    durable evidence itself, spec FR-016 — they survive a later re-chunk of the document even
+    though `chunk_id` (kept only as a best-effort live link) is nulled out by that same
+    re-chunk, exactly like `ConversationTurnChunk.chunk_id`.
+    """
+
+    __tablename__ = "golden_dataset_entry_chunks"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    entry_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("golden_dataset_entries.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    chunk_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("chunks.id", ondelete="SET NULL"), nullable=True
+    )
+    # Snapshot of which document this evidence came from — no FK (pure snapshot column, same
+    # as ConversationTurnChunk.document_id); populated for corpus-scoped entries, informational
+    # for document-scoped ones since the parent entry's own document_id already identifies it.
+    document_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
+    # Snapshot of the chunk's position at selection time — informational only, never used to
+    # re-identify the chunk after a re-chunk (content is what's authoritative, FR-016).
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Stable display order among an entry's evidence chunks (insertion order) — no
+    # scoring/ranking connotation, unlike ConversationTurnChunk.rank.
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    entry: Mapped["GoldenDatasetEntry"] = relationship(back_populates="chunks")
+
+
 class TurnQualityScore(Base):
     """Automatically computed LLM-as-judge quality scores for one answered `ConversationTurn`
     (019-metrics-dashboard research.md §6). Row absence means "not yet scored" — distinct from

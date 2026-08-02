@@ -10,6 +10,7 @@ export type ScreenId =
   | 'fixed-size-chunking'
   | 'embeddings'
   | 'vector-view'
+  | 'golden-dataset'
   | 'playground'
   | 'metrics'
   | 'profile'
@@ -36,6 +37,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   { label: 'Embeddings', screen: 'embeddings' },
   { label: 'Vector View', screen: 'vector-view' },
+  { label: 'Golden Dataset', screen: 'golden-dataset', requiresAnthropicKey: true },
   { label: 'Playground', screen: 'playground', requiresAnthropicKey: true },
   { label: 'Metrics', screen: 'metrics', requiresAnthropicKey: true },
 ]

@@ -2,7 +2,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Chunk, ConversationTurn, Corpus, Document
+from app.db.models import Chunk, ConversationTurn, Corpus, Document, GoldenDatasetEntry
 
 
 def _is_valid_uuid(value: str) -> bool:
@@ -35,6 +35,12 @@ def get_conversation_turn_or_none(db: Session, turn_id: str) -> ConversationTurn
     if not _is_valid_uuid(turn_id):
         return None
     return db.get(ConversationTurn, turn_id)
+
+
+def get_golden_dataset_entry_or_none(db: Session, entry_id: str) -> GoldenDatasetEntry | None:
+    if not _is_valid_uuid(entry_id):
+        return None
+    return db.get(GoldenDatasetEntry, entry_id)
 
 
 def get_corpus_owned_by(db: Session, corpus_id: str, user_id: str) -> Corpus | None:
@@ -71,3 +77,12 @@ def get_conversation_turn_owned_by(
     if owner_id != user_id:
         return None
     return turn
+
+
+def get_golden_dataset_entry_owned_by(
+    db: Session, entry_id: str, user_id: str
+) -> GoldenDatasetEntry | None:
+    entry = get_golden_dataset_entry_or_none(db, entry_id)
+    if entry is None or entry.user_id != user_id:
+        return None
+    return entry

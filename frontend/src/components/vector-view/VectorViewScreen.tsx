@@ -298,10 +298,10 @@ export function VectorViewScreen({ onNavigate }: VectorViewScreenProps) {
         <div className="mt-4 flex shrink-0 items-center justify-end gap-3 border-t border-outline-variant pt-4">
           <button
             type="button"
-            onClick={() => onNavigate('playground')}
+            onClick={() => onNavigate('golden-dataset')}
             className="rounded border border-outline-variant px-4 py-2 text-sm font-medium text-on-surface disabled:opacity-50"
           >
-            Move to Playground
+            Move to Golden Dataset
           </button>
         </div>
       </div>
