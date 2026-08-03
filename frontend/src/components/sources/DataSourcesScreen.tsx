@@ -60,11 +60,11 @@ export function DataSourcesScreen({ onNavigate }: DataSourcesScreenProps) {
           <p className="mt-2 text-on-surface-variant">Manage ingestion pipelines.</p>
         </div>
 
-        <div className="mt-6 flex min-h-0 flex-1 gap-6">
+        <div className="mt-6 flex min-h-0 min-w-0 flex-1 gap-6">
           {!isFullscreen && (
             <div
               data-testid="sources-left-pane"
-              className="flex min-h-0 w-1/2 flex-col overflow-y-auto pr-2"
+              className="flex min-h-0 min-w-0 w-1/2 flex-col overflow-y-auto pr-2"
             >
               {isCorporaLoading ? (
                 <p className="text-on-surface-variant" role="status">
@@ -120,7 +120,7 @@ export function DataSourcesScreen({ onNavigate }: DataSourcesScreenProps) {
           <div
             data-testid="sources-right-pane"
             className={
-              'flex min-h-0 flex-col rounded-lg border border-outline-variant bg-surface-container ' +
+              'flex min-h-0 min-w-0 flex-col rounded-lg border border-outline-variant bg-surface-container ' +
               (isFullscreen ? 'w-full' : 'w-1/2')
             }
           >

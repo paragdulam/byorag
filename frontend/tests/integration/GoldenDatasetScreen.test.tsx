@@ -1,4 +1,4 @@
-import { render as rtlRender, screen, waitFor } from '@testing-library/react'
+import { render as rtlRender, screen, waitFor, within } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -17,6 +17,17 @@ vi.mock('../../src/context/AuthContext', () => ({
     logout: vi.fn(),
     refreshAnthropicKeyStatus: vi.fn(),
   }),
+}))
+
+// react-pdf/pdfjs needs a real worker + canvas, neither of which jsdom provides — stubbed here
+// (028-golden-dataset-split-view) the same way DataSourcesScreen's integration suite already does,
+// so the split-pane tests can assert which document's file URL the reused preview was pointed at.
+vi.mock('react-pdf', () => ({
+  pdfjs: { GlobalWorkerOptions: {} },
+  Document: (props: { file: { url: string } }) => (
+    <div data-testid="mock-pdf-document">{props.file.url}</div>
+  ),
+  Page: () => null,
 }))
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -112,5 +123,186 @@ describe('GoldenDatasetScreen — manual creation flow (026-golden-dataset US1)'
 
     await waitFor(() => expect(screen.getByText('What is the notice period?')).toBeInTheDocument())
     expect(screen.getByText(/approved/i)).toBeInTheDocument()
+  })
+})
+
+describe('GoldenDatasetScreen — split-pane PDF preview (028-golden-dataset-split-view US1)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function stubFetch() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const href = url.toString()
+        if (href.includes('/api/corpora')) {
+          return jsonResponse({ corpora: [{ id: 'corpus-a', name: 'Corpus A', createdAt: '2026-07-14T00:00:00Z' }] })
+        }
+        if (href.includes('/api/sources')) {
+          return jsonResponse({
+            documents: [
+              { id: 'doc-a', name: 'a.pdf', sizeBytes: 10, uploadedAt: '2026-07-14T01:00:00Z', status: 'processed' },
+              { id: 'doc-b', name: 'b.pdf', sizeBytes: 20, uploadedAt: '2026-07-14T01:05:00Z', status: 'processed' },
+            ],
+            rejections: [],
+          })
+        }
+        if (href.includes('/api/golden-dataset/entries')) {
+          return jsonResponse({ entries: [] })
+        }
+        throw new Error(`Unhandled request: ${href}`)
+      }),
+    )
+  }
+
+  it('renders a left pane and a right pane once a corpus is selected', async () => {
+    stubFetch()
+
+    render(<GoldenDatasetScreen onNavigate={vi.fn()} />)
+
+    expect(await screen.findByTestId('golden-dataset-left-pane')).toBeInTheDocument()
+    expect(screen.getByTestId('golden-dataset-right-pane')).toBeInTheDocument()
+  })
+
+  it('previews the document currently selected in the scope dropdown by default', async () => {
+    stubFetch()
+
+    render(<GoldenDatasetScreen onNavigate={vi.fn()} />)
+
+    const rightPane = await screen.findByTestId('golden-dataset-right-pane')
+    await waitFor(() =>
+      expect(within(rightPane).getByTestId('mock-pdf-document')).toHaveTextContent(
+        '/api/sources/doc-a/file',
+      ),
+    )
+  })
+
+  it('shows a neutral empty state in the right pane when scope is "Entire Corpus"', async () => {
+    stubFetch()
+
+    render(<GoldenDatasetScreen onNavigate={vi.fn()} />)
+
+    await screen.findByTestId('golden-dataset-right-pane')
+    await userEvent.selectOptions(screen.getByLabelText(/scope/i), 'Entire Corpus')
+
+    const rightPane = screen.getByTestId('golden-dataset-right-pane')
+    expect(within(rightPane).getByTestId('source-preview-empty')).toBeInTheDocument()
+  })
+
+  it('switches the preview when a different document is selected in the scope dropdown', async () => {
+    stubFetch()
+
+    render(<GoldenDatasetScreen onNavigate={vi.fn()} />)
+
+    const rightPane = await screen.findByTestId('golden-dataset-right-pane')
+    await waitFor(() =>
+      expect(within(rightPane).getByTestId('mock-pdf-document')).toHaveTextContent(
+        '/api/sources/doc-a/file',
+      ),
+    )
+
+    await userEvent.selectOptions(screen.getByLabelText(/scope/i), 'b.pdf')
+
+    await waitFor(() =>
+      expect(within(rightPane).getByTestId('mock-pdf-document')).toHaveTextContent(
+        '/api/sources/doc-b/file',
+      ),
+    )
+  })
+
+  it('preserves unsaved editor text and stays in the manual editor across a fullscreen toggle (FR-012)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const href = url.toString()
+        if (href.includes('/api/corpora')) {
+          return jsonResponse({ corpora: [{ id: 'corpus-a', name: 'Corpus A', createdAt: '2026-07-14T00:00:00Z' }] })
+        }
+        if (href.includes('/api/sources')) {
+          return jsonResponse({
+            documents: [{ id: 'doc-a', name: 'a.pdf', sizeBytes: 10, uploadedAt: '2026-07-14T01:00:00Z', status: 'processed' }],
+            rejections: [],
+          })
+        }
+        if (href.includes('/api/golden-dataset/candidates')) {
+          return jsonResponse({ candidates: [] })
+        }
+        if (href.includes('/api/golden-dataset/entries')) {
+          return jsonResponse({ entries: [] })
+        }
+        throw new Error(`Unhandled request: ${href}`)
+      }),
+    )
+
+    render(<GoldenDatasetScreen onNavigate={vi.fn()} />)
+
+    await screen.findByTestId('golden-dataset-right-pane')
+    await userEvent.click(screen.getByRole('button', { name: /write manually/i }))
+    await userEvent.type(screen.getByLabelText(/^question$/i), 'Unsaved draft question')
+
+    await userEvent.click(screen.getByTestId('source-preview-fullscreen-toggle'))
+    expect(screen.getByTestId('golden-dataset-left-pane')).toHaveClass('hidden')
+
+    await userEvent.click(screen.getByTestId('source-preview-fullscreen-toggle'))
+    expect(screen.getByTestId('golden-dataset-left-pane')).not.toHaveClass('hidden')
+    expect(screen.getByLabelText(/^question$/i)).toHaveValue('Unsaved draft question')
+  })
+})
+
+describe('GoldenDatasetScreen — control row below the scope dropdown (028-golden-dataset-split-view US3)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function stubFetch() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const href = url.toString()
+        if (href.includes('/api/corpora')) {
+          return jsonResponse({ corpora: [{ id: 'corpus-a', name: 'Corpus A', createdAt: '2026-07-14T00:00:00Z' }] })
+        }
+        if (href.includes('/api/sources')) {
+          return jsonResponse({
+            documents: [{ id: 'doc-a', name: 'a.pdf', sizeBytes: 10, uploadedAt: '2026-07-14T01:00:00Z', status: 'processed' }],
+            rejections: [],
+          })
+        }
+        if (href.includes('/api/golden-dataset/entries')) {
+          return jsonResponse({ entries: [] })
+        }
+        throw new Error(`Unhandled request: ${href}`)
+      }),
+    )
+  }
+
+  it('places the scope dropdown above a single horizontal row of Write Manually / Generate with LLM / batch count / Generate a Batch, in that order', async () => {
+    stubFetch()
+
+    render(<GoldenDatasetScreen onNavigate={vi.fn()} />)
+
+    const leftPane = await screen.findByTestId('golden-dataset-left-pane')
+    const scopeSelect = within(leftPane).getByLabelText(/scope/i)
+    const writeManually = within(leftPane).getByRole('button', { name: /write manually/i })
+    const generateWithLlm = within(leftPane).getByRole('button', { name: /generate with llm/i })
+    const batchCount = within(leftPane).getByLabelText(/batch size/i)
+    const generateBatch = within(leftPane).getByRole('button', { name: /generate a batch/i })
+
+    // The dropdown sits above the control row entirely (DOCUMENT_POSITION_PRECEDING), and the
+    // four controls are siblings of each other appearing in this exact order.
+    expect(scopeSelect.compareDocumentPosition(writeManually) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(writeManually.parentElement).toBe(generateWithLlm.parentElement)
+    expect(writeManually.parentElement).toBe(batchCount.parentElement)
+    expect(writeManually.parentElement).toBe(generateBatch.parentElement)
+    expect(
+      writeManually.compareDocumentPosition(generateWithLlm) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      generateWithLlm.compareDocumentPosition(batchCount) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      batchCount.compareDocumentPosition(generateBatch) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
   })
 })

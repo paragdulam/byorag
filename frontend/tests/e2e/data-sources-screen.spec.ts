@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { makePdf } from './fixtures/makePdf'
+import { makePdf, makeMultiPagePdf } from './fixtures/makePdf'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURES_DIR = path.join(__dirname, 'fixtures')
@@ -159,14 +159,24 @@ test.describe('Data Sources Screen', () => {
     const zoomOut = page.getByTestId('source-preview-zoom-out')
     const reset = page.getByTestId('source-preview-zoom-reset')
     const scrollArea = page.getByTestId('source-preview-scroll-area')
+    const rightPane = page.getByTestId('sources-right-pane')
 
     // US1: zoom in enlarges the page and updates the indicator.
     await expect(zoomLevel).toHaveText('100%')
+    const widthBeforeZoom = (await rightPane.boundingBox())?.width
     await zoomIn.click()
     await zoomIn.click()
     await zoomIn.click()
     await zoomIn.click()
     await expect(zoomLevel).toHaveText('200%')
+
+    // 028-golden-dataset-split-view US2/FR-005/SC-002: zooming in must not change the preview
+    // pane's own outer width — only the scrollable content inside it grows. Previously this pane
+    // (and its sibling, the left pane) would widen because the flex chain down to the scroll area
+    // lacked `min-width: 0`, so the browser refused to let it shrink below the zoomed page's
+    // intrinsic content width (research.md §1).
+    const widthAfterZoom = (await rightPane.boundingBox())?.width
+    expect(widthAfterZoom).toBe(widthBeforeZoom)
 
     // react-pdf re-renders the canvas at the new scale asynchronously (a pdf.js render task,
     // not synchronous with the React state update the zoom buttons trigger), so wait for the
@@ -210,5 +220,112 @@ test.describe('Data Sources Screen', () => {
     await expect(zoomLevel).toHaveText('125%')
     await zoomIn.click()
     await expect(zoomLevel).toHaveText('150%')
+  })
+
+  test('the page indicator shows current/total pages and tracks scroll position (029-pdf-preview-page-count)', async ({
+    page,
+  }) => {
+    const suffix = Date.now()
+    // Same DocumentList responsive-layout workaround as the zoom/pan test above.
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await page.goto('/')
+
+    await page.getByRole('button', { name: /sign up/i }).click()
+    await page.getByLabel('Email').fill(`page-indicator-${suffix}@example.com`)
+    await page.getByLabel('Password').fill('hunter22')
+    await page.getByRole('button', { name: /^sign up$/i }).click()
+    await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible()
+
+    const corpusName = `Page Indicator Test ${suffix}`
+    const main = page.locator('main')
+    await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
+    await main.getByRole('button', { name: /new corpus/i }).click()
+    await main.getByLabel(/new corpus name/i).fill(corpusName)
+    await main.getByRole('button', { name: /^create$/i }).click()
+    await expect(main.getByTestId(/corpus-row-/).filter({ hasText: corpusName })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
+
+    // A real, parseable 5-page PDF — enough pages to scroll through and observe the page
+    // indicator advance and retreat.
+    await page.setInputFiles('[data-testid="upload-browse-input"]', {
+      name: 'page-indicator-source.pdf',
+      mimeType: 'application/pdf',
+      buffer: makeMultiPagePdf(5),
+    })
+    await expect(page.getByText('PROCESSED').first()).toBeVisible({ timeout: 10000 })
+
+    const docButton = page.getByRole('button', { name: 'page-indicator-source.pdf', exact: true })
+    await expect(docButton).toBeVisible()
+    await docButton.click()
+    await expect(page.locator('.react-pdf__Page').first()).toBeVisible()
+
+    const indicator = page.getByTestId('source-preview-page-indicator')
+    await expect(indicator).toHaveText('Page 1 of 5')
+
+    const scrollArea = page.getByTestId('source-preview-scroll-area')
+    await page.locator('[data-preview-page="5"]').scrollIntoViewIfNeeded()
+    await expect(indicator).toHaveText('Page 5 of 5', { timeout: 5000 })
+
+    await scrollArea.evaluate((el) => {
+      el.scrollTop = 0
+    })
+    await expect(indicator).toHaveText('Page 1 of 5', { timeout: 5000 })
+  })
+
+  test('the page indicator stays correct while zooming in and out (029-pdf-preview-page-count US2)', async ({
+    page,
+  }) => {
+    const suffix = Date.now()
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await page.goto('/')
+
+    await page.getByRole('button', { name: /sign up/i }).click()
+    await page.getByLabel('Email').fill(`page-indicator-zoom-${suffix}@example.com`)
+    await page.getByLabel('Password').fill('hunter22')
+    await page.getByRole('button', { name: /^sign up$/i }).click()
+    await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible()
+
+    const corpusName = `Page Indicator Zoom Test ${suffix}`
+    const main = page.locator('main')
+    await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
+    await main.getByRole('button', { name: /new corpus/i }).click()
+    await main.getByLabel(/new corpus name/i).fill(corpusName)
+    await main.getByRole('button', { name: /^create$/i }).click()
+    await expect(main.getByTestId(/corpus-row-/).filter({ hasText: corpusName })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
+
+    await page.setInputFiles('[data-testid="upload-browse-input"]', {
+      name: 'page-indicator-zoom-source.pdf',
+      mimeType: 'application/pdf',
+      buffer: makeMultiPagePdf(5),
+    })
+    await expect(page.getByText('PROCESSED').first()).toBeVisible({ timeout: 10000 })
+
+    const docButton = page.getByRole('button', { name: 'page-indicator-zoom-source.pdf', exact: true })
+    await expect(docButton).toBeVisible()
+    await docButton.click()
+    await expect(page.locator('.react-pdf__Page').first()).toBeVisible()
+
+    const indicator = page.getByTestId('source-preview-page-indicator')
+    await page.locator('[data-preview-page="3"]').scrollIntoViewIfNeeded()
+    await expect(indicator).toHaveText('Page 3 of 5', { timeout: 5000 })
+
+    const zoomIn = page.getByTestId('source-preview-zoom-in')
+    const zoomOut = page.getByTestId('source-preview-zoom-out')
+
+    // US2: zooming in/out must not itself change which page the indicator reports.
+    await zoomIn.click()
+    await zoomIn.click()
+    await expect(indicator).toHaveText('Page 3 of 5')
+
+    await zoomOut.click()
+    await zoomOut.click()
+    await expect(indicator).toHaveText('Page 3 of 5')
   })
 })

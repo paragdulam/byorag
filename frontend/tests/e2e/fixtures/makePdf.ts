@@ -54,3 +54,69 @@ export function makePdf(text: string): Buffer {
 export function makeWordsPdf(wordCount: number, word = 'word'): Buffer {
   return makePdf(Array.from({ length: wordCount }, () => word).join(' '))
 }
+
+// Same minimal, valid-PDF construction as makePdf, generalized to `pageCount` pages sharing
+// one /Type/Pages parent (Kids listing every page, Count pageCount) — 029-pdf-preview-page-count
+// e2e specs need a real, multi-page, pypdf-extractable PDF to scroll/zoom through and assert
+// the page indicator against.
+export function makeMultiPagePdf(pageCount: number, textPerPage?: string[]): Buffer {
+  const pageObjectNumbers = Array.from({ length: pageCount }, (_, index) => 3 + index * 2)
+  const fontObjectNumber = 3 + pageCount * 2
+
+  const objects: { num: number; body: Buffer }[] = [
+    { num: 1, body: Buffer.from('<</Type/Catalog/Pages 2 0 R>>') },
+    {
+      num: 2,
+      body: Buffer.from(
+        `<</Type/Pages/Kids[${pageObjectNumbers.map((n) => `${n} 0 R`).join(' ')}]/Count ${pageCount}>>`,
+      ),
+    },
+    { num: fontObjectNumber, body: Buffer.from('<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>') },
+  ]
+
+  pageObjectNumbers.forEach((pageNum, index) => {
+    const contentsNum = pageNum + 1
+    objects.push({
+      num: pageNum,
+      body: Buffer.from(
+        `<</Type/Page/Parent 2 0 R/Resources<</Font<</F1 ${fontObjectNumber} 0 R>>>>` +
+          `/MediaBox[0 0 600 800]/Contents ${contentsNum} 0 R>>`,
+      ),
+    })
+
+    const text = textPerPage?.[index] ?? `Page ${index + 1} of ${pageCount}`
+    const stream = Buffer.from(`BT /F1 12 Tf 10 700 Td (${text}) Tj ET`)
+    objects.push({
+      num: contentsNum,
+      body: Buffer.concat([
+        Buffer.from(`<</Length ${stream.length}>>\nstream\n`),
+        stream,
+        Buffer.from('\nendstream'),
+      ]),
+    })
+  })
+
+  objects.sort((a, b) => a.num - b.num)
+
+  const chunks: Buffer[] = [Buffer.from('%PDF-1.4\n')]
+  const offsets: number[] = [0]
+  let position = chunks[0].length
+
+  objects.forEach(({ num, body }) => {
+    offsets[num] = position
+    const chunk = Buffer.concat([Buffer.from(`${num} 0 obj\n`), body, Buffer.from('\nendobj\n')])
+    chunks.push(chunk)
+    position += chunk.length
+  })
+
+  const xrefOffset = position
+  const count = objects.length + 1
+  const xrefLines = [`xref\n0 ${count}\n`, '0000000000 65535 f \n']
+  for (let num = 1; num < count; num++) {
+    xrefLines.push(`${String(offsets[num]).padStart(10, '0')} 00000 n \n`)
+  }
+  chunks.push(Buffer.from(xrefLines.join('')))
+  chunks.push(Buffer.from(`trailer\n<</Size ${count}/Root 1 0 R>>\nstartxref\n${xrefOffset}\n%%EOF`))
+
+  return Buffer.concat(chunks)
+}

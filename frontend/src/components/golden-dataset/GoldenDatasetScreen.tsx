@@ -10,6 +10,8 @@ import type { GoldenEntry, GoldenEntrySummary } from '../../types/goldenDataset'
 import { GoldenEntryEditor } from './GoldenEntryEditor'
 import { GoldenReviewQueue } from './GoldenReviewQueue'
 import { BatchGenerationProgress } from './BatchGenerationProgress'
+import { SourceDocumentPreview } from '../sources/SourceDocumentPreview'
+import type { BatchItemResult } from '../../lib/batchRunner'
 
 export interface GoldenDatasetScreenProps {
   onNavigate: (screen: ScreenId) => void
@@ -36,6 +38,10 @@ export function GoldenDatasetScreen({ onNavigate }: GoldenDatasetScreenProps) {
   const [generateError, setGenerateError] = useState<string | null>(null)
   const [batchCount, setBatchCount] = useState(3)
   const [isBatchRunning, setIsBatchRunning] = useState(false)
+  const [lastBatchResults, setLastBatchResults] = useState<BatchItemResult<GoldenEntry>[] | null>(
+    null,
+  )
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   useEffect(() => {
     if (activeCorpusId === null) {
@@ -85,8 +91,9 @@ export function GoldenDatasetScreen({ onNavigate }: GoldenDatasetScreenProps) {
     }
   }
 
-  function handleBatchComplete() {
+  function handleBatchComplete(results: BatchItemResult<GoldenEntry>[]) {
     setIsBatchRunning(false)
+    setLastBatchResults(results)
     refreshEntries()
   }
 
@@ -116,139 +123,180 @@ export function GoldenDatasetScreen({ onNavigate }: GoldenDatasetScreenProps) {
             Select or create a corpus first.
           </p>
         ) : (
-          <div className="mt-6 flex min-h-0 flex-1 flex-col gap-6">
-            <div className="flex shrink-0 items-end justify-between gap-4">
-              <div>
-                <label
-                  className="block text-sm text-on-surface-variant"
-                  htmlFor="golden-dataset-document"
-                >
-                  Scope
-                </label>
-                <select
-                  id="golden-dataset-document"
-                  value={activeDocumentId}
-                  onChange={(event) => setSelectedDocumentId(event.target.value)}
-                  className="mt-1 rounded border border-outline-variant bg-surface p-2 text-on-surface"
-                >
-                  <option value={ENTIRE_CORPUS_SELECTION}>Entire Corpus</option>
-                  {documents.map((doc) => (
-                    <option key={doc.id} value={doc.id}>
-                      {doc.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsCreatingManually(true)}
-                  className="rounded bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:opacity-90"
-                >
-                  Write Manually
-                </button>
-                <button
-                  type="button"
-                  onClick={handleGenerate}
-                  disabled={isGenerating}
-                  className="rounded border border-outline-variant px-4 py-2 text-sm font-medium text-on-surface hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Generate with LLM
-                </button>
-                <label htmlFor="golden-dataset-batch-count" className="sr-only">
-                  Batch size
-                </label>
-                <input
-                  id="golden-dataset-batch-count"
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={batchCount}
-                  onChange={(event) => setBatchCount(Number(event.target.value) || 1)}
-                  disabled={isBatchRunning}
-                  className="w-16 rounded border border-outline-variant bg-surface p-2 text-on-surface"
-                />
-                <button
-                  type="button"
-                  onClick={() => setIsBatchRunning(true)}
-                  disabled={isBatchRunning}
-                  className="rounded border border-outline-variant px-4 py-2 text-sm font-medium text-on-surface hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Generate a Batch…
-                </button>
-              </div>
-            </div>
-
-            {generateError !== null && (
-              <p role="alert" className="shrink-0 text-sm text-error">
-                {generateError}
-              </p>
-            )}
-
-            {isBatchRunning && (
-              <div className="shrink-0 rounded-lg border border-outline-variant bg-surface-container p-3">
-                <BatchGenerationProgress
-                  corpusId={activeCorpusId}
-                  documentId={isEntireCorpus ? null : activeDocumentId}
-                  count={batchCount}
-                  onComplete={handleBatchComplete}
-                />
-              </div>
-            )}
-
-            {isCreatingManually && (
-              <div className="shrink-0 rounded-lg border border-outline-variant bg-surface-container p-4">
-                <GoldenEntryEditor
-                  scope={{
-                    corpusId: activeCorpusId,
-                    documentId: isEntireCorpus ? null : activeDocumentId,
-                  }}
-                  onSaved={handleSaved}
-                />
-              </div>
-            )}
-
-            {pendingEntries.length > 0 && (
+          <div className="mt-6 flex min-h-0 min-w-0 flex-1 gap-6">
+            {/* Stays mounted (hidden via CSS, not conditionally unmounted) while fullscreen —
+                unlike Sources' left pane, this one holds ephemeral state (unsaved editor text in
+                GoldenEntryEditor) that would otherwise be lost and reset on every fullscreen
+                toggle, violating FR-012's "unsaved editor input... is preserved, not discarded." */}
+            <div
+              data-testid="golden-dataset-left-pane"
+              className={
+                'flex min-h-0 min-w-0 w-1/2 flex-col gap-6 overflow-y-auto ' +
+                (isFullscreen ? 'hidden' : '')
+              }
+            >
               <div className="shrink-0">
-                <h2 className="text-sm font-medium text-on-surface">
-                  Pending Review ({pendingEntries.length})
-                </h2>
-                <div className="mt-2">
-                  <GoldenReviewQueue entries={pendingEntries} onEntryChanged={handleEntryChanged} />
+                  <label
+                    className="block text-sm text-on-surface-variant"
+                    htmlFor="golden-dataset-document"
+                  >
+                    Scope
+                  </label>
+                  <select
+                    id="golden-dataset-document"
+                    value={activeDocumentId}
+                    onChange={(event) => setSelectedDocumentId(event.target.value)}
+                    className="mt-1 rounded border border-outline-variant bg-surface p-2 text-on-surface"
+                  >
+                    <option value={ENTIRE_CORPUS_SELECTION}>Entire Corpus</option>
+                    {documents.map((doc) => (
+                      <option key={doc.id} value={doc.id}>
+                        {doc.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsCreatingManually(true)}
+                    className="rounded bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:opacity-90"
+                  >
+                    Write Manually
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGenerate}
+                    disabled={isGenerating}
+                    className="rounded border border-outline-variant px-4 py-2 text-sm font-medium text-on-surface hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Generate with LLM
+                  </button>
+                  <label htmlFor="golden-dataset-batch-count" className="sr-only">
+                    Batch size
+                  </label>
+                  <input
+                    id="golden-dataset-batch-count"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={batchCount}
+                    onChange={(event) => setBatchCount(Number(event.target.value) || 1)}
+                    disabled={isBatchRunning}
+                    className="w-16 rounded border border-outline-variant bg-surface p-2 text-on-surface"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLastBatchResults(null)
+                      setIsBatchRunning(true)
+                    }}
+                    disabled={isBatchRunning}
+                    className="rounded border border-outline-variant px-4 py-2 text-sm font-medium text-on-surface hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Generate a Batch…
+                  </button>
+                </div>
+
+                {generateError !== null && (
+                  <p role="alert" className="shrink-0 text-sm text-error">
+                    {generateError}
+                  </p>
+                )}
+
+                {isBatchRunning && (
+                  <div className="shrink-0 rounded-lg border border-outline-variant bg-surface-container p-3">
+                    <BatchGenerationProgress
+                      corpusId={activeCorpusId}
+                      documentId={isEntireCorpus ? null : activeDocumentId}
+                      count={batchCount}
+                      onComplete={handleBatchComplete}
+                    />
+                  </div>
+                )}
+
+                {/* Captured directly from handleBatchComplete's own argument rather than relying
+                    on BatchGenerationProgress's brief pre-unmount render of the same message —
+                    that render and this component's unmount (isBatchRunning -> false) both fire
+                    from the same effect-flush cycle, close enough together that the browser can
+                    commit both without an observable paint in between, making the message
+                    effectively invisible. Kept here instead, in state that isn't tied to
+                    BatchGenerationProgress's mount lifecycle at all. */}
+                {!isBatchRunning && lastBatchResults !== null && (
+                  <p className="shrink-0 text-sm text-on-surface-variant">
+                    {lastBatchResults.filter((result) => result.status === 'success').length} of{' '}
+                    {lastBatchResults.length} entries generated successfully.
+                  </p>
+                )}
+
+                {isCreatingManually && (
+                  <div className="shrink-0 rounded-lg border border-outline-variant bg-surface-container p-4">
+                    <GoldenEntryEditor
+                      scope={{
+                        corpusId: activeCorpusId,
+                        documentId: isEntireCorpus ? null : activeDocumentId,
+                      }}
+                      onSaved={handleSaved}
+                    />
+                  </div>
+                )}
+
+                {pendingEntries.length > 0 && (
+                  <div className="shrink-0">
+                    <h2 className="text-sm font-medium text-on-surface">
+                      Pending Review ({pendingEntries.length})
+                    </h2>
+                    <div className="mt-2">
+                      <GoldenReviewQueue entries={pendingEntries} onEntryChanged={handleEntryChanged} />
+                    </div>
+                  </div>
+                )}
+
+                <div className="min-h-0 flex-1">
+                  {entries.length === 0 ? (
+                    <p className="text-on-surface-variant">No golden dataset entries yet.</p>
+                  ) : (
+                    <ul data-testid="golden-entry-list" className="flex flex-col gap-2">
+                      {entries.map((entry) => (
+                        <li
+                          key={entry.id}
+                          data-testid={`golden-entry-${entry.id}`}
+                          className="flex items-center justify-between gap-4 rounded-lg border border-outline-variant bg-surface-container p-3"
+                        >
+                          <span className="text-sm text-on-surface">{entry.question}</span>
+                          <span className="flex items-center gap-2 text-xs text-on-surface-variant">
+                            <span>{STATUS_LABELS[entry.status]}</span>
+                            <span>·</span>
+                            <span>{SOURCE_LABELS[entry.source]}</span>
+                            <button
+                              type="button"
+                              aria-label={`Delete ${entry.question}`}
+                              onClick={() => handleDelete(entry)}
+                              className="rounded border border-outline-variant px-2 py-1 text-xs text-on-surface hover:bg-surface-container-high"
+                            >
+                              Delete
+                            </button>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </div>
-            )}
 
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {entries.length === 0 ? (
-                <p className="text-on-surface-variant">No golden dataset entries yet.</p>
-              ) : (
-                <ul data-testid="golden-entry-list" className="flex flex-col gap-2">
-                  {entries.map((entry) => (
-                    <li
-                      key={entry.id}
-                      data-testid={`golden-entry-${entry.id}`}
-                      className="flex items-center justify-between gap-4 rounded-lg border border-outline-variant bg-surface-container p-3"
-                    >
-                      <span className="text-sm text-on-surface">{entry.question}</span>
-                      <span className="flex items-center gap-2 text-xs text-on-surface-variant">
-                        <span>{STATUS_LABELS[entry.status]}</span>
-                        <span>·</span>
-                        <span>{SOURCE_LABELS[entry.source]}</span>
-                        <button
-                          type="button"
-                          aria-label={`Delete ${entry.question}`}
-                          onClick={() => handleDelete(entry)}
-                          className="rounded border border-outline-variant px-2 py-1 text-xs text-on-surface hover:bg-surface-container-high"
-                        >
-                          Delete
-                        </button>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+            <div
+              data-testid="golden-dataset-right-pane"
+              className={
+                'flex min-h-0 min-w-0 flex-col rounded-lg border border-outline-variant bg-surface-container ' +
+                (isFullscreen ? 'w-full' : 'w-1/2')
+              }
+            >
+              <SourceDocumentPreview
+                documentId={isEntireCorpus ? null : activeDocumentId}
+                isFullscreen={isFullscreen}
+                onToggleFullscreen={() => setIsFullscreen((current) => !current)}
+              />
             </div>
           </div>
         )}

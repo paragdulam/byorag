@@ -30,6 +30,42 @@ beforeEach(() => {
   pageRenders = []
 })
 
+interface CapturedObserver {
+  callback: IntersectionObserverCallback
+  observedElements: Element[]
+}
+
+function installIntersectionObserverMock(): { getLatest: () => CapturedObserver | null } {
+  let latest: CapturedObserver | null = null
+
+  class MockIntersectionObserver {
+    constructor(callback: IntersectionObserverCallback) {
+      latest = { callback, observedElements: [] }
+    }
+    observe(el: Element) {
+      latest?.observedElements.push(el)
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+
+  vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
+  return { getLatest: () => latest }
+}
+
+function fireIntersection(observer: CapturedObserver, ratios: Record<number, number>) {
+  const entries = observer.observedElements.map(
+    (el) =>
+      ({
+        target: el,
+        intersectionRatio: ratios[Number((el as HTMLElement).dataset.previewPage)] ?? 0,
+      }) as IntersectionObserverEntry,
+  )
+  act(() => {
+    observer.callback(entries, {} as IntersectionObserver)
+  })
+}
+
 describe('SourceDocumentPreview (021-sources-chunking-embeddings-refresh US2)', () => {
   it('shows an empty placeholder when no document is selected', () => {
     render(
@@ -261,6 +297,140 @@ describe('SourceDocumentPreview — return to default view (026-pdf-preview-zoom
     await userEvent.click(screen.getByTestId('source-preview-zoom-reset'))
 
     expect(screen.getByTestId('source-preview-zoom-level')).toHaveTextContent('100%')
+  })
+})
+
+describe('SourceDocumentPreview — fixed-width viewport while zoomed (028-golden-dataset-split-view US2)', () => {
+  it('marks the root container and the scroll area min-width: 0, so they can shrink below their zoomed content instead of growing (research.md §1)', () => {
+    const { container } = render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+
+    const root = container.firstElementChild as HTMLElement
+    expect(root.className).toMatch(/\bmin-w-0\b/)
+    expect(screen.getByTestId('source-preview-scroll-area').className).toMatch(/\bmin-w-0\b/)
+  })
+})
+
+describe('SourceDocumentPreview — page indicator (029-pdf-preview-page-count US1)', () => {
+  it('shows "Page 1 of N" once the document finishes loading, before any scroll', () => {
+    const { getLatest } = installIntersectionObserverMock()
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+
+    act(() => {
+      latestDocumentProps?.onLoadSuccess?.({ numPages: 3 })
+    })
+
+    expect(screen.getByTestId('source-preview-page-indicator')).toHaveTextContent('Page 1 of 3')
+    expect(getLatest()).not.toBeNull()
+  })
+
+  it('updates the current page when a later page becomes predominantly visible', () => {
+    const { getLatest } = installIntersectionObserverMock()
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+    act(() => {
+      latestDocumentProps?.onLoadSuccess?.({ numPages: 3 })
+    })
+
+    const observer = getLatest()
+    if (!observer) throw new Error('observer not captured')
+    fireIntersection(observer, { 1: 0.1, 2: 0.9, 3: 0 })
+
+    expect(screen.getByTestId('source-preview-page-indicator')).toHaveTextContent('Page 2 of 3')
+  })
+
+  it('updates back to an earlier page when it becomes predominantly visible again', () => {
+    const { getLatest } = installIntersectionObserverMock()
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+    act(() => {
+      latestDocumentProps?.onLoadSuccess?.({ numPages: 3 })
+    })
+
+    const observer = getLatest()
+    if (!observer) throw new Error('observer not captured')
+    fireIntersection(observer, { 1: 0, 2: 0.9, 3: 0.1 })
+    fireIntersection(observer, { 1: 0.9, 2: 0.1, 3: 0 })
+
+    expect(screen.getByTestId('source-preview-page-indicator')).toHaveTextContent('Page 1 of 3')
+  })
+})
+
+describe('SourceDocumentPreview — page indicator stays correct while zooming (029-pdf-preview-page-count US2)', () => {
+  it('does not change the indicator by itself when zoom-in or zoom-out is clicked', async () => {
+    const { getLatest } = installIntersectionObserverMock()
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+    act(() => {
+      latestDocumentProps?.onLoadSuccess?.({ numPages: 3 })
+    })
+
+    const observer = getLatest()
+    if (!observer) throw new Error('observer not captured')
+    fireIntersection(observer, { 1: 0, 2: 0.9, 3: 0.1 })
+    expect(screen.getByTestId('source-preview-page-indicator')).toHaveTextContent('Page 2 of 3')
+
+    await userEvent.click(screen.getByTestId('source-preview-zoom-in'))
+    expect(screen.getByTestId('source-preview-page-indicator')).toHaveTextContent('Page 2 of 3')
+
+    await userEvent.click(screen.getByTestId('source-preview-zoom-out'))
+    expect(screen.getByTestId('source-preview-page-indicator')).toHaveTextContent('Page 2 of 3')
+  })
+})
+
+describe('SourceDocumentPreview — page indicator loading/error/empty/switch states (029-pdf-preview-page-count US3)', () => {
+  it('shows no indicator when no document is selected', () => {
+    render(
+      <SourceDocumentPreview documentId={null} isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+
+    expect(screen.queryByTestId('source-preview-page-indicator')).not.toBeInTheDocument()
+  })
+
+  it('shows no indicator before the document has finished loading', () => {
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+
+    expect(screen.queryByTestId('source-preview-page-indicator')).not.toBeInTheDocument()
+  })
+
+  it('shows no indicator when the document fails to load', () => {
+    render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+
+    act(() => {
+      latestDocumentProps?.onLoadError?.()
+    })
+
+    expect(screen.queryByTestId('source-preview-page-indicator')).not.toBeInTheDocument()
+  })
+
+  it('resets to the newly selected document\'s own page count on documentId change, never showing the previous document\'s values', () => {
+    const { rerender } = render(
+      <SourceDocumentPreview documentId="doc-1" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+    act(() => {
+      latestDocumentProps?.onLoadSuccess?.({ numPages: 3 })
+    })
+    expect(screen.getByTestId('source-preview-page-indicator')).toHaveTextContent('Page 1 of 3')
+
+    rerender(
+      <SourceDocumentPreview documentId="doc-2" isFullscreen={false} onToggleFullscreen={vi.fn()} />,
+    )
+    expect(screen.queryByTestId('source-preview-page-indicator')).not.toBeInTheDocument()
+
+    act(() => {
+      latestDocumentProps?.onLoadSuccess?.({ numPages: 5 })
+    })
+    expect(screen.getByTestId('source-preview-page-indicator')).toHaveTextContent('Page 1 of 5')
   })
 })
 

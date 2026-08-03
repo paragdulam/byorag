@@ -14,6 +14,21 @@ if (typeof globalThis.DOMMatrix === 'undefined') {
   globalThis.DOMMatrix = MockDOMMatrix
 }
 
+// jsdom has no IntersectionObserver at all; SourceDocumentPreview uses one to track which
+// page is predominantly visible for its page indicator (029-pdf-preview-page-count). A no-op
+// stand-in is enough here — tests that need to drive visibility changes stub
+// globalThis.IntersectionObserver themselves with a capturing mock before rendering.
+if (typeof globalThis.IntersectionObserver === 'undefined') {
+  class MockIntersectionObserver {
+    constructor(..._args: unknown[]) {}
+    observe(..._args: unknown[]) {}
+    unobserve(..._args: unknown[]) {}
+    disconnect(..._args: unknown[]) {}
+  }
+  // @ts-expect-error - test-only polyfill, not a full IntersectionObserver implementation
+  globalThis.IntersectionObserver = MockIntersectionObserver
+}
+
 // Default fetch mock: routes by URL so every hook that fetches on mount
 // (useSourceDocuments, useSystemCapacity, CorpusContext) gets a sane
 // empty/ready response without a real network call, unless a test overrides

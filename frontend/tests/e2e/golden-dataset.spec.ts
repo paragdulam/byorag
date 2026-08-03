@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { makePdf } from './fixtures/makePdf'
+import { makePdf, makeMultiPagePdf } from './fixtures/makePdf'
 
 test.describe('Golden Dataset', () => {
   test('manual creation, single LLM generation + approval, and batch generation (026-golden-dataset)', async ({
@@ -222,5 +222,192 @@ test.describe('Golden Dataset', () => {
     await page.getByRole('button', { name: 'Generate a Batch…' }).click()
     await expect(page.getByText(/entries generated successfully/i)).toBeVisible({ timeout: 15000 })
     await expect(page.getByText(/pending review \(2\)/i)).toBeVisible()
+  })
+
+  test('splits the screen into a left pane and a right-side PDF preview whose width stays fixed while zooming (028-golden-dataset-split-view)', async ({
+    page,
+  }) => {
+    const suffix = Date.now()
+
+    // Same DocumentList responsive-layout workaround as the other e2e specs in this suite
+    // (see the comment on the test above).
+    await page.setViewportSize({ width: 1600, height: 900 })
+
+    // Saving a key normally live-validates it against Anthropic (profile/service.py's
+    // validate_key) — this e2e environment has no real Anthropic key, so, like the test above,
+    // stub the save/status endpoint rather than hitting Anthropic with a fake key.
+    let mockedHasKey = false
+    await page.route('**/api/profile/anthropic-key', async (route) => {
+      const method = route.request().method()
+      if (method === 'PUT') {
+        mockedHasKey = true
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ hasKey: true, maskedKey: '...wxyz' }),
+        })
+        return
+      }
+      if (method === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(
+            mockedHasKey ? { hasKey: true, maskedKey: '...wxyz' } : { hasKey: false, maskedKey: null },
+          ),
+        })
+        return
+      }
+      await route.continue()
+    })
+
+    await page.goto('/')
+    await page.getByRole('button', { name: /sign up/i }).click()
+    await page.getByLabel('Email').fill(`golden-dataset-split-${suffix}@example.com`)
+    await page.getByLabel('Password').fill('hunter22')
+    await page.getByRole('button', { name: /^sign up$/i }).click()
+    await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible()
+
+    // Golden Dataset is gated behind a personal Anthropic key, same as Playground/Metrics —
+    // no LLM calls are made in this test, but the nav entry itself requires a key on file.
+    await page.getByLabel('Profile').click()
+    await page.getByLabel(/anthropic api key/i).fill('sk-ant-testwxyz')
+    await page.getByRole('button', { name: /^save$/i }).click()
+    await expect(page.getByText('...wxyz')).toBeVisible()
+
+    const corpusName = `Golden Dataset Split View E2E ${suffix}`
+    const main = page.locator('main')
+    await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
+    await main.getByRole('button', { name: /new corpus/i }).click()
+    await main.getByLabel(/new corpus name/i).fill(corpusName)
+    await main.getByRole('button', { name: /^create$/i }).click()
+    await expect(main.getByTestId(/corpus-row-/).filter({ hasText: corpusName })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+
+    // A real, parseable single-page PDF (600x800pt) — large enough that a few zoom-in clicks
+    // exceed the pane's width, matching the equivalent Sources-screen zoom/pan e2e fixture.
+    await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
+    await page.setInputFiles('[data-testid="upload-browse-input"]', {
+      name: 'golden-dataset-split-view-source.pdf',
+      mimeType: 'application/pdf',
+      buffer: makePdf('Split view zoom-width e2e fixture content, repeated for visible bulk.'),
+    })
+    await expect(page.getByText('PROCESSED').first()).toBeVisible({ timeout: 10000 })
+
+    await page.getByRole('link', { name: 'GOLDEN DATASET', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Golden Dataset' })).toBeVisible()
+
+    // FR-001/US1: the screen is split into a left pane and a right pane, and the right pane
+    // previews the document the scope dropdown defaults to (the corpus's only document).
+    const leftPane = page.getByTestId('golden-dataset-left-pane')
+    const rightPane = page.getByTestId('golden-dataset-right-pane')
+    await expect(leftPane).toBeVisible()
+    await expect(page.locator('.react-pdf__Page').first()).toBeVisible()
+
+    const zoomLevel = page.getByTestId('source-preview-zoom-level')
+    const zoomIn = page.getByTestId('source-preview-zoom-in')
+    await expect(zoomLevel).toHaveText('100%')
+    const leftWidthBefore = (await leftPane.boundingBox())?.width
+    const rightWidthBefore = (await rightPane.boundingBox())?.width
+
+    await zoomIn.click()
+    await zoomIn.click()
+    await zoomIn.click()
+    await zoomIn.click()
+    await expect(zoomLevel).toHaveText('200%')
+
+    // FR-005/FR-006/SC-002: zooming the right-half preview to a high level must not change
+    // either pane's outer width — this is the same fixed-width fix as the Sources screen
+    // (research.md §1), applied here to the Golden Dataset screen's own panes.
+    const leftWidthAfter = (await leftPane.boundingBox())?.width
+    const rightWidthAfter = (await rightPane.boundingBox())?.width
+    expect(rightWidthAfter).toBe(rightWidthBefore)
+    expect(leftWidthAfter).toBe(leftWidthBefore)
+  })
+
+  test('the split-view preview shows a page indicator that tracks scroll position (029-pdf-preview-page-count)', async ({
+    page,
+  }) => {
+    const suffix = Date.now()
+
+    // Same DocumentList responsive-layout workaround as the other e2e specs in this suite.
+    await page.setViewportSize({ width: 1600, height: 900 })
+
+    let mockedHasKey = false
+    await page.route('**/api/profile/anthropic-key', async (route) => {
+      const method = route.request().method()
+      if (method === 'PUT') {
+        mockedHasKey = true
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ hasKey: true, maskedKey: '...wxyz' }),
+        })
+        return
+      }
+      if (method === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(
+            mockedHasKey ? { hasKey: true, maskedKey: '...wxyz' } : { hasKey: false, maskedKey: null },
+          ),
+        })
+        return
+      }
+      await route.continue()
+    })
+
+    await page.goto('/')
+    await page.getByRole('button', { name: /sign up/i }).click()
+    await page.getByLabel('Email').fill(`golden-dataset-page-indicator-${suffix}@example.com`)
+    await page.getByLabel('Password').fill('hunter22')
+    await page.getByRole('button', { name: /^sign up$/i }).click()
+    await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible()
+
+    await page.getByLabel('Profile').click()
+    await page.getByLabel(/anthropic api key/i).fill('sk-ant-testwxyz')
+    await page.getByRole('button', { name: /^save$/i }).click()
+    await expect(page.getByText('...wxyz')).toBeVisible()
+
+    const corpusName = `Golden Dataset Page Indicator E2E ${suffix}`
+    const main = page.locator('main')
+    await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
+    await main.getByRole('button', { name: /new corpus/i }).click()
+    await main.getByLabel(/new corpus name/i).fill(corpusName)
+    await main.getByRole('button', { name: /^create$/i }).click()
+    await expect(main.getByTestId(/corpus-row-/).filter({ hasText: corpusName })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+
+    // A real, parseable 5-page PDF — enough pages to scroll through in the split-view preview.
+    await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
+    await page.setInputFiles('[data-testid="upload-browse-input"]', {
+      name: 'golden-dataset-page-indicator-source.pdf',
+      mimeType: 'application/pdf',
+      buffer: makeMultiPagePdf(5),
+    })
+    await expect(page.getByText('PROCESSED').first()).toBeVisible({ timeout: 10000 })
+
+    await page.getByRole('link', { name: 'GOLDEN DATASET', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Golden Dataset' })).toBeVisible()
+    await expect(page.locator('.react-pdf__Page').first()).toBeVisible()
+
+    // FR-002: the shared preview's page indicator shows up here too, tracking scroll position
+    // the same way it does on the Data Sources screen.
+    const indicator = page.getByTestId('source-preview-page-indicator')
+    await expect(indicator).toHaveText('Page 1 of 5')
+
+    const scrollArea = page.getByTestId('source-preview-scroll-area')
+    await page.locator('[data-preview-page="5"]').scrollIntoViewIfNeeded()
+    await expect(indicator).toHaveText('Page 5 of 5', { timeout: 5000 })
+
+    await scrollArea.evaluate((el) => {
+      el.scrollTop = 0
+    })
+    await expect(indicator).toHaveText('Page 1 of 5', { timeout: 5000 })
   })
 })
