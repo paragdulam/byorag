@@ -54,7 +54,7 @@ describe('SidebarNav', () => {
   it('renders all five top-level sections, labeled "Chunking" (not "Experiments"), with Sources marked active by default', async () => {
     stubCorporaFetch([])
     renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
-    await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('corpora-nav-active-corpus')).toBeInTheDocument())
 
     expect(screen.getByText('SOURCES')).toBeInTheDocument()
     expect(screen.getByText('CHUNKING')).toBeInTheDocument()
@@ -70,7 +70,7 @@ describe('SidebarNav', () => {
   it('reveals "Fixed Size Chunking" when Chunking is expanded', async () => {
     stubCorporaFetch([])
     renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
-    await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('corpora-nav-active-corpus')).toBeInTheDocument())
 
     expect(screen.queryByText('FIXED SIZE CHUNKING')).not.toBeInTheDocument()
 
@@ -83,7 +83,7 @@ describe('SidebarNav', () => {
     stubCorporaFetch([])
     const onNavigate = vi.fn()
     renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={onNavigate} />)
-    await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('corpora-nav-active-corpus')).toBeInTheDocument())
 
     await userEvent.click(screen.getByText('CHUNKING'))
     await userEvent.click(screen.getByText('FIXED SIZE CHUNKING'))
@@ -94,7 +94,7 @@ describe('SidebarNav', () => {
   it('marks the Fixed Size Chunking sub-option as active when it is the active screen', async () => {
     stubCorporaFetch([])
     renderWithProvider(<SidebarNav activeScreen="fixed-size-chunking" onNavigate={vi.fn()} />)
-    await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('corpora-nav-active-corpus')).toBeInTheDocument())
 
     await userEvent.click(screen.getByText('CHUNKING'))
 
@@ -105,7 +105,7 @@ describe('SidebarNav', () => {
   it('also lists "Embeddings" alongside "Fixed Size Chunking" when Chunking is expanded', async () => {
     stubCorporaFetch([])
     renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
-    await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('corpora-nav-active-corpus')).toBeInTheDocument())
 
     await userEvent.click(screen.getByText('CHUNKING'))
 
@@ -117,7 +117,7 @@ describe('SidebarNav', () => {
     stubCorporaFetch([])
     const onNavigate = vi.fn()
     renderWithProvider(<SidebarNav activeScreen="fixed-size-chunking" onNavigate={onNavigate} />)
-    await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('corpora-nav-active-corpus')).toBeInTheDocument())
 
     await userEvent.click(screen.getByText('CHUNKING'))
     await userEvent.click(screen.getByText('EMBEDDINGS'))
@@ -125,180 +125,74 @@ describe('SidebarNav', () => {
     expect(onNavigate).toHaveBeenCalledWith('embeddings')
   })
 
-  describe('Corpora section (010-corpora-dropdown-nav)', () => {
-    it('renders a closed dropdown toggle, positioned above Sources, labeled with the active corpus name', async () => {
+  describe('Corpora nav item shows the active corpus inline (no sidebar dropdown)', () => {
+    it('shows the active corpus name in a subtitle under the CORPORA label', async () => {
       stubCorporaFetch([{ id: 'a', name: 'Research Notes', createdAt: '2026-07-14T10:00:00Z' }])
-      const { container } = renderWithProvider(
-        <SidebarNav activeScreen="sources" onNavigate={vi.fn()} />,
-      )
+      renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
+
       await waitFor(() =>
-        expect(screen.getByTestId('active-corpus-dropdown-toggle')).toHaveTextContent(/research notes/i),
+        expect(screen.getByTestId('corpora-nav-active-corpus')).toHaveTextContent('Research Notes'),
       )
 
-      expect(screen.getByTestId('active-corpus-dropdown-toggle')).toHaveAttribute('aria-expanded', 'false')
-      expect(screen.queryByTestId('active-corpus-dropdown-panel')).not.toBeInTheDocument()
-
-      const text = container.textContent ?? ''
-      expect(text.indexOf('RESEARCH NOTES')).toBeLessThan(text.indexOf('SOURCES'))
+      const corporaLink = screen.getByText('CORPORA').closest('a') as HTMLElement
+      expect(within(corporaLink).getByTestId('corpora-nav-active-corpus')).toBeInTheDocument()
     })
 
-    it('shows a "No corpus selected" prompt in the closed toggle when no corpora exist', async () => {
+    it('shows a "No corpus selected" subtitle when no corpora exist', async () => {
       stubCorporaFetch([])
       renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
 
       await waitFor(() =>
-        expect(screen.getByTestId('active-corpus-dropdown-toggle')).toHaveTextContent(/no corpus selected/i),
+        expect(screen.getByTestId('corpora-nav-active-corpus')).toHaveTextContent(/no corpus selected/i),
       )
     })
 
-    it('opens the panel on click, revealing an empty-state message when no corpora exist', async () => {
-      stubCorporaFetch([])
-      renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
-      await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
-
-      expect(screen.queryByTestId('active-corpus-dropdown-panel')).not.toBeInTheDocument()
-
-      await userEvent.click(screen.getByTestId('active-corpus-dropdown-toggle'))
-
-      expect(screen.getByTestId('active-corpus-dropdown-panel')).toBeInTheDocument()
-      expect(screen.getByText(/no corpora yet/i)).toBeInTheDocument()
-    })
-
-    it('reveals every corpus as a row in the open panel, marking the active one', async () => {
+    it('no longer renders the sidebar corpus-switcher dropdown anywhere', async () => {
       stubCorporaFetch([
         { id: 'a', name: 'Corpus A', createdAt: '2026-07-14T10:00:00Z' },
         { id: 'b', name: 'Corpus B', createdAt: '2026-07-14T10:05:00Z' },
       ])
       renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
       await waitFor(() =>
-        expect(screen.getByTestId('active-corpus-dropdown-toggle')).toHaveTextContent(/corpus a/i),
+        expect(screen.getByTestId('corpora-nav-active-corpus')).toHaveTextContent(/corpus a/i),
       )
 
-      await userEvent.click(screen.getByTestId('active-corpus-dropdown-toggle'))
-
-      const rowA = screen.getByTestId('dropdown-corpus-row-a')
-      const rowB = screen.getByTestId('dropdown-corpus-row-b')
-      expect(within(rowA).getByText('Corpus A')).toBeInTheDocument()
-      expect(within(rowB).getByText('Corpus B')).toBeInTheDocument()
-      expect(rowA).toHaveAttribute('aria-current', 'page')
-      expect(rowB).not.toHaveAttribute('aria-current')
-    })
-
-    it('closes the panel when the toggle is clicked again', async () => {
-      stubCorporaFetch([{ id: 'a', name: 'Corpus A', createdAt: '2026-07-14T10:00:00Z' }])
-      renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
-      await waitFor(() =>
-        expect(screen.getByTestId('active-corpus-dropdown-toggle')).toHaveTextContent(/corpus a/i),
-      )
-
-      await userEvent.click(screen.getByTestId('active-corpus-dropdown-toggle'))
-      expect(screen.getByTestId('active-corpus-dropdown-panel')).toBeInTheDocument()
-
-      await userEvent.click(screen.getByTestId('active-corpus-dropdown-toggle'))
+      expect(screen.queryByTestId('active-corpus-dropdown-toggle')).not.toBeInTheDocument()
       expect(screen.queryByTestId('active-corpus-dropdown-panel')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('dropdown-corpus-row-a')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('dropdown-corpus-row-b')).not.toBeInTheDocument()
     })
 
-    it('closes the panel when clicking outside it', async () => {
-      stubCorporaFetch([{ id: 'a', name: 'Corpus A', createdAt: '2026-07-14T10:00:00Z' }])
-      renderWithProvider(
-        <div>
-          <SidebarNav activeScreen="sources" onNavigate={vi.fn()} />
-          <div data-testid="outside-target">Outside</div>
-        </div>,
-      )
+    it('clicking Corpora still navigates to the corpora screen rather than switching corpus in place', async () => {
+      stubCorporaFetch([
+        { id: 'a', name: 'Corpus A', createdAt: '2026-07-14T10:00:00Z' },
+        { id: 'b', name: 'Corpus B', createdAt: '2026-07-14T10:05:00Z' },
+      ])
+      const onNavigate = vi.fn()
+      renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={onNavigate} />)
       await waitFor(() =>
-        expect(screen.getByTestId('active-corpus-dropdown-toggle')).toHaveTextContent(/corpus a/i),
+        expect(screen.getByTestId('corpora-nav-active-corpus')).toHaveTextContent(/corpus a/i),
       )
 
-      await userEvent.click(screen.getByTestId('active-corpus-dropdown-toggle'))
-      expect(screen.getByTestId('active-corpus-dropdown-panel')).toBeInTheDocument()
+      await userEvent.click(screen.getByText('CORPORA'))
 
-      await userEvent.click(screen.getByTestId('outside-target'))
-      expect(screen.queryByTestId('active-corpus-dropdown-panel')).not.toBeInTheDocument()
-    })
-
-    it('closes the panel when the Escape key is pressed', async () => {
-      stubCorporaFetch([{ id: 'a', name: 'Corpus A', createdAt: '2026-07-14T10:00:00Z' }])
-      renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
-      await waitFor(() =>
-        expect(screen.getByTestId('active-corpus-dropdown-toggle')).toHaveTextContent(/corpus a/i),
-      )
-
-      await userEvent.click(screen.getByTestId('active-corpus-dropdown-toggle'))
-      expect(screen.getByTestId('active-corpus-dropdown-panel')).toBeInTheDocument()
-
-      await userEvent.keyboard('{Escape}')
-      expect(screen.queryByTestId('active-corpus-dropdown-panel')).not.toBeInTheDocument()
-    })
-
-    it('does not render a create-corpus control anywhere in the sidebar, closed or open', async () => {
-      stubCorporaFetch([{ id: 'a', name: 'Corpus A', createdAt: '2026-07-14T10:00:00Z' }])
-      renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
-      await waitFor(() =>
-        expect(screen.getByTestId('active-corpus-dropdown-toggle')).toHaveTextContent(/corpus a/i),
-      )
-
-      expect(screen.queryByRole('button', { name: /new corpus/i })).not.toBeInTheDocument()
-      expect(screen.queryByLabelText(/new corpus name/i)).not.toBeInTheDocument()
-
-      await userEvent.click(screen.getByTestId('active-corpus-dropdown-toggle'))
-
-      expect(screen.queryByRole('button', { name: /new corpus/i })).not.toBeInTheDocument()
-      expect(screen.queryByLabelText(/new corpus name/i)).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /^create$/i })).not.toBeInTheDocument()
+      expect(onNavigate).toHaveBeenCalledWith('corpora')
     })
   })
 
-  describe('Corpora dropdown: no action buttons, click-to-select (011-move-corpus-row-actions US2)', () => {
-    it('renders zero "Make Active" or "Delete" buttons anywhere in the open panel', async () => {
-      stubCorporaFetch([
-        { id: 'a', name: 'Corpus A', createdAt: '2026-07-14T10:00:00Z' },
-        { id: 'b', name: 'Corpus B', createdAt: '2026-07-14T10:05:00Z' },
-      ])
-      renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
-      await waitFor(() =>
-        expect(screen.getByTestId('active-corpus-dropdown-toggle')).toHaveTextContent(/corpus a/i),
-      )
-
-      await userEvent.click(screen.getByTestId('active-corpus-dropdown-toggle'))
-      const panel = screen.getByTestId('active-corpus-dropdown-panel')
-
-      expect(within(panel).queryByRole('button', { name: /make .* active/i })).not.toBeInTheDocument()
-      expect(within(panel).queryByRole('button', { name: /^delete/i })).not.toBeInTheDocument()
-    })
-
-    it('clicking a non-active corpus\'s row switches the active corpus app-wide', async () => {
-      stubCorporaFetch([
-        { id: 'a', name: 'Corpus A', createdAt: '2026-07-14T10:00:00Z' },
-        { id: 'b', name: 'Corpus B', createdAt: '2026-07-14T10:05:00Z' },
-      ])
-      renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
-      await waitFor(() =>
-        expect(screen.getByTestId('active-corpus-dropdown-toggle')).toHaveTextContent(/corpus a/i),
-      )
-
-      await userEvent.click(screen.getByTestId('active-corpus-dropdown-toggle'))
-      await userEvent.click(screen.getByTestId('dropdown-corpus-row-b'))
-
-      await waitFor(() =>
-        expect(screen.getByTestId('active-corpus-dropdown-toggle')).toHaveTextContent(/corpus b/i),
-      )
-      expect(screen.getByTestId('dropdown-corpus-row-b')).toHaveAttribute('aria-current', 'page')
-      expect(screen.getByTestId('dropdown-corpus-row-a')).not.toHaveAttribute('aria-current')
-    })
-  })
-
-  describe('Chevron indicator (008-corpora-management US4)', () => {
-    it('shows a chevron next to Chunking, and no chevron next to non-expandable items', async () => {
+  describe('Chevron indicator (008-corpora-management US4, 029-corpora-nav-redesign)', () => {
+    it('shows a chevron next to Chunking and next to Corpora, and no chevron next to other items', async () => {
       stubCorporaFetch([])
       renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
-      await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByTestId('corpora-nav-active-corpus')).toBeInTheDocument())
 
       const navChevrons = screen.getAllByTestId('chevron-icon').filter((el) => el.closest('a'))
-      expect(navChevrons).toHaveLength(1)
+      expect(navChevrons).toHaveLength(2)
 
+      const corporaLink = screen.getByText('CORPORA').closest('a')
       const sourcesLink = screen.getByText('SOURCES').closest('a')
       const embeddingsLink = screen.getByText('EMBEDDINGS').closest('a')
+      expect(corporaLink?.querySelector('[data-testid="chevron-icon"]')).not.toBeNull()
       expect(sourcesLink?.querySelector('[data-testid="chevron-icon"]')).toBeNull()
       expect(embeddingsLink?.querySelector('[data-testid="chevron-icon"]')).toBeNull()
     })
@@ -306,7 +200,7 @@ describe('SidebarNav', () => {
     it('rotates the chevron and updates aria-expanded when Chunking is expanded and collapsed', async () => {
       stubCorporaFetch([])
       renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
-      await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByTestId('corpora-nav-active-corpus')).toBeInTheDocument())
 
       const chunkingLink = screen.getByText('CHUNKING').closest('a') as HTMLElement
       expect(chunkingLink).toHaveAttribute('aria-expanded', 'false')
@@ -327,7 +221,7 @@ describe('SidebarNav', () => {
       const { container } = renderWithProvider(
         <SidebarNav activeScreen="sources" onNavigate={vi.fn()} />,
       )
-      await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByTestId('corpora-nav-active-corpus')).toBeInTheDocument())
 
       expect(screen.getByText('CORPORA')).toBeInTheDocument()
       const text = container.textContent ?? ''
@@ -338,7 +232,7 @@ describe('SidebarNav', () => {
       stubCorporaFetch([])
       const onNavigate = vi.fn()
       renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={onNavigate} />)
-      await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByTestId('corpora-nav-active-corpus')).toBeInTheDocument())
 
       await userEvent.click(screen.getByText('CORPORA'))
 
@@ -348,21 +242,21 @@ describe('SidebarNav', () => {
     it('marks the Corpora nav item as active when it is the active screen', async () => {
       stubCorporaFetch([])
       renderWithProvider(<SidebarNav activeScreen="corpora" onNavigate={vi.fn()} />)
-      await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByTestId('corpora-nav-active-corpus')).toBeInTheDocument())
 
-      expect(screen.getByText('CORPORA')).toHaveAttribute('aria-current', 'page')
+      expect(screen.getByText('CORPORA').closest('a')).toHaveAttribute('aria-current', 'page')
       expect(screen.getByText('SOURCES')).not.toHaveAttribute('aria-current')
     })
 
-    it('does not duplicate the "CORPORA" label between the nav item and the dropdown toggle', async () => {
+    it('renders exactly one "CORPORA" label, with the active corpus name as its own subtitle text', async () => {
       stubCorporaFetch([{ id: 'a', name: 'Research Notes', createdAt: '2026-07-14T10:00:00Z' }])
       renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
 
       await waitFor(() =>
-        expect(screen.getByTestId('active-corpus-dropdown-toggle')).toHaveTextContent(/research notes/i),
+        expect(screen.getByTestId('corpora-nav-active-corpus')).toHaveTextContent('Research Notes'),
       )
-      // Exactly one "CORPORA" text node should remain: the nav item's label.
       expect(screen.getAllByText('CORPORA')).toHaveLength(1)
+      expect(screen.queryByText('RESEARCH NOTES')).not.toBeInTheDocument()
     })
   })
 
@@ -372,7 +266,7 @@ describe('SidebarNav', () => {
       stubCorporaFetch([])
       const onNavigate = vi.fn()
       renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={onNavigate} />)
-      await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByTestId('corpora-nav-active-corpus')).toBeInTheDocument())
 
       const playgroundLink = screen.getByText('PLAYGROUND').closest('a') as HTMLElement
       const metricsLink = screen.getByText('METRICS').closest('a') as HTMLElement
@@ -391,7 +285,7 @@ describe('SidebarNav', () => {
       mockAuth({ hasAnthropicKey: false })
       stubCorporaFetch([])
       renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={vi.fn()} />)
-      await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByTestId('corpora-nav-active-corpus')).toBeInTheDocument())
 
       for (const label of ['CORPORA', 'SOURCES', 'CHUNKING', 'EMBEDDINGS', 'VECTOR VIEW']) {
         const link = screen.getByText(label).closest('a') as HTMLElement
@@ -404,7 +298,7 @@ describe('SidebarNav', () => {
       stubCorporaFetch([])
       const onNavigate = vi.fn()
       renderWithProvider(<SidebarNav activeScreen="sources" onNavigate={onNavigate} />)
-      await waitFor(() => expect(screen.getByTestId('active-corpus-dropdown-toggle')).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByTestId('corpora-nav-active-corpus')).toBeInTheDocument())
 
       const playgroundLink = screen.getByText('PLAYGROUND').closest('a') as HTMLElement
       const metricsLink = screen.getByText('METRICS').closest('a') as HTMLElement

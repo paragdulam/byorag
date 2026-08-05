@@ -32,9 +32,8 @@ function renderScreen() {
       <CorporaScreen onNavigate={vi.fn()} />
     </CorpusProvider>,
   )
-  // Scoped to <main> throughout -- the sidebar's own quick-switcher list
-  // (CorporaSection) renders the same corpora/labels alongside the screen,
-  // so unscoped queries would be ambiguous.
+  // Scoped to <main> for consistency with other screen test suites, even though this one
+  // renders CorporaScreen directly without SidebarNav/AppShell around it.
   return within(screen.getByRole('main'))
 }
 

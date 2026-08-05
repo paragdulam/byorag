@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useCorpus } from '../../context/CorpusContext'
 
@@ -71,88 +71,6 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
   )
 }
 
-function CorporaSection() {
-  const { corpora, activeCorpusId, isLoading, selectCorpus } = useCorpus()
-  const [isOpen, setIsOpen] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!isOpen) {
-      return
-    }
-
-    function handlePointerDown(event: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setIsOpen(false)
-      }
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setIsOpen(false)
-      }
-    }
-
-    document.addEventListener('mousedown', handlePointerDown)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [isOpen])
-
-  const activeCorpus = corpora.find((corpus) => corpus.id === activeCorpusId)
-  const toggleLabel = activeCorpus ? activeCorpus.name : 'No corpus selected'
-
-  return (
-    <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        data-testid="active-corpus-dropdown-toggle"
-        aria-expanded={isOpen}
-        onClick={() => setIsOpen((prev) => !prev)}
-        className="flex w-full items-center justify-between gap-2 rounded px-3 py-2 font-mono text-xs font-medium tracking-widest text-on-surface hover:bg-surface-container"
-      >
-        <span style={{textAlign: "left", textWrap: "auto", textTransform: "uppercase"}}>
-          {toggleLabel}
-        </span>
-        <ChevronIcon expanded={isOpen} />
-      </button>
-
-      {isOpen && (
-        <div
-          data-testid="active-corpus-dropdown-panel"
-          className="mt-1 flex flex-col gap-1 rounded border border-outline-variant bg-surface p-1"
-        >
-          {!isLoading && corpora.length === 0 && (
-            <div className="px-3 py-2 text-xs text-on-surface-variant">No corpora yet.</div>
-          )}
-          <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto">
-            {corpora.map((corpus) => {
-              const isActive = corpus.id === activeCorpusId
-              return (
-                <li key={corpus.id}>
-                  <button
-                    type="button"
-                    data-testid={`dropdown-corpus-row-${corpus.id}`}
-                    aria-current={isActive ? 'page' : undefined}
-                    onClick={() => selectCorpus(corpus.id)}
-                    className={
-                      navLinkClassName(isActive) + ' block w-full truncate text-left uppercase'
-                    }
-                  >
-                    {corpus.name}
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        </div>
-      )}
-    </div>
-  )
-}
-
 export interface SidebarNavProps {
   activeScreen: ScreenId
   onNavigate: (screen: ScreenId) => void
@@ -161,6 +79,8 @@ export interface SidebarNavProps {
 export function SidebarNav({ activeScreen, onNavigate }: SidebarNavProps) {
   const [expandedLabel, setExpandedLabel] = useState<string | null>(null)
   const { hasAnthropicKey } = useAuth()
+  const { corpora, activeCorpusId } = useCorpus()
+  const activeCorpus = corpora.find((corpus) => corpus.id === activeCorpusId)
 
   return (
     <nav
@@ -177,13 +97,12 @@ export function SidebarNav({ activeScreen, onNavigate }: SidebarNavProps) {
         </div>
       </div>
 
-      <CorporaSection />
-
       <ul className="flex flex-col gap-1">
         {NAV_ITEMS.map((item) => {
           const isActive = item.screen === activeScreen
           const isExpanded = expandedLabel === item.label
           const isDisabled = Boolean(item.requiresAnthropicKey) && !hasAnthropicKey
+          const isCorpora = item.screen === 'corpora'
 
           return (
             <li key={item.label}>
@@ -205,7 +124,7 @@ export function SidebarNav({ activeScreen, onNavigate }: SidebarNavProps) {
                   }
                 }}
                 className={
-                  item.subItems
+                  item.subItems || isCorpora
                     ? navLinkClassName(isActive, isDisabled) +
                       ' flex items-center justify-between gap-2'
                     : navLinkClassName(isActive, isDisabled)
@@ -215,6 +134,20 @@ export function SidebarNav({ activeScreen, onNavigate }: SidebarNavProps) {
                   <>
                     <span>{item.label.toUpperCase()}</span>
                     <ChevronIcon expanded={isExpanded} />
+                  </>
+                ) : isCorpora ? (
+                  <>
+                    <span className="flex flex-col items-start gap-0.5">
+                      <span>{item.label.toUpperCase()}</span>
+                      <span
+                        data-testid="corpora-nav-active-corpus"
+                        aria-hidden="true"
+                        className="text-[10px] font-normal normal-case tracking-normal opacity-70"
+                      >
+                        {activeCorpus ? activeCorpus.name : 'No corpus selected'}
+                      </span>
+                    </span>
+                    <ChevronIcon expanded={false} />
                   </>
                 ) : (
                   item.label.toUpperCase()
