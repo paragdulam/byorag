@@ -74,11 +74,15 @@ test.describe('Golden Dataset', () => {
       if (url.pathname.endsWith('/api/golden-dataset/generate') && method === 'POST') {
         generatedCount += 1
         const now = new Date().toISOString()
-        const body = request.postDataJSON() as { corpusId: string }
+        // 030-golden-dataset-entry-detail US1: the entry list now filters by documentId, so
+        // this fake response must actually honor the requested scope like the real backend
+        // does — a hardcoded `documentId: null` here would make a document-scoped "Generate
+        // with LLM" entry silently vanish from a document-scoped list.
+        const body = request.postDataJSON() as { corpusId: string; documentId: string | null }
         const fake: FakeEntry = {
           id: `generated-${generatedCount}`,
           corpusId: body.corpusId,
-          documentId: null,
+          documentId: body.documentId,
           question: `Generated question ${generatedCount}?`,
           preferredAnswer: `Generated answer ${generatedCount}.`,
           status: 'pending_review',
@@ -409,5 +413,308 @@ test.describe('Golden Dataset', () => {
       el.scrollTop = 0
     })
     await expect(indicator).toHaveText('Page 1 of 5', { timeout: 5000 })
+  })
+
+  test('the entry list respects the scope dropdown instead of always showing every entry (030-golden-dataset-entry-detail US1)', async ({
+    page,
+  }) => {
+    const suffix = Date.now()
+
+    await page.setViewportSize({ width: 1600, height: 900 })
+
+    // Golden Dataset is gated behind a personal Anthropic key (025-user-profile-anthropic-key)
+    // even though this test's own manual-creation path never calls Anthropic — stub the
+    // save/status endpoint the same way the other tests in this suite do, since this e2e
+    // environment has no real key configured.
+    let mockedHasKey = false
+    await page.route('**/api/profile/anthropic-key', async (route) => {
+      const method = route.request().method()
+      if (method === 'PUT') {
+        mockedHasKey = true
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ hasKey: true, maskedKey: '...wxyz' }),
+        })
+        return
+      }
+      if (method === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(
+            mockedHasKey ? { hasKey: true, maskedKey: '...wxyz' } : { hasKey: false, maskedKey: null },
+          ),
+        })
+        return
+      }
+      await route.continue()
+    })
+
+    await page.goto('/')
+    await page.getByRole('button', { name: /sign up/i }).click()
+    await page.getByLabel('Email').fill(`golden-dataset-scope-${suffix}@example.com`)
+    await page.getByLabel('Password').fill('hunter22')
+    await page.getByRole('button', { name: /^sign up$/i }).click()
+    await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible()
+
+    await page.getByLabel('Profile').click()
+    await page.getByLabel(/anthropic api key/i).fill('sk-ant-testwxyz')
+    await page.getByRole('button', { name: /^save$/i }).click()
+    await expect(page.getByText('...wxyz')).toBeVisible()
+
+    const corpusName = `Golden Dataset Scope E2E ${suffix}`
+    const main = page.locator('main')
+    await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
+    await main.getByRole('button', { name: /new corpus/i }).click()
+    await main.getByLabel(/new corpus name/i).fill(corpusName)
+    await main.getByRole('button', { name: /^create$/i }).click()
+    await expect(main.getByTestId(/corpus-row-/).filter({ hasText: corpusName })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+
+    // Real corpus, real documents list, but a stubbed golden-dataset entries response — this
+    // test is about the screen's own scope-filtering logic (US1), not a re-verification of
+    // the full chunk/embed/manual-create pipeline the first test in this file already covers.
+    await page.route('**/api/sources*', async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.continue()
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          documents: [
+            { id: 'doc-a', name: 'scope-doc-a.pdf', sizeBytes: 100, uploadedAt: '2026-08-05T00:00:00Z', status: 'processed' },
+            { id: 'doc-b', name: 'scope-doc-b.pdf', sizeBytes: 100, uploadedAt: '2026-08-05T00:05:00Z', status: 'processed' },
+          ],
+          rejections: [],
+        }),
+      })
+    })
+    await page.route('**/api/golden-dataset/entries*', async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.continue()
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entries: [
+            {
+              id: 'entry-a',
+              corpusId: 'ignored',
+              documentId: 'doc-a',
+              question: 'What is the deadline?',
+              status: 'approved',
+              source: 'manual',
+              createdAt: '2026-08-05T00:10:00Z',
+            },
+            {
+              id: 'entry-b',
+              corpusId: 'ignored',
+              documentId: 'doc-b',
+              question: 'What is the fee?',
+              status: 'approved',
+              source: 'manual',
+              createdAt: '2026-08-05T00:15:00Z',
+            },
+          ],
+        }),
+      })
+    })
+
+    await page.getByRole('link', { name: 'GOLDEN DATASET', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Golden Dataset' })).toBeVisible()
+
+    // US1 FR-002: "Entire Corpus" shows every entry across both documents.
+    await page.getByLabel(/scope/i).selectOption('Entire Corpus')
+    await expect(page.getByText('What is the deadline?')).toBeVisible()
+    await expect(page.getByText('What is the fee?')).toBeVisible()
+
+    // US1 FR-003: selecting one document shows only that document's entry.
+    await page.getByLabel(/scope/i).selectOption({ label: 'scope-doc-a.pdf' })
+    await expect(page.getByText('What is the deadline?')).toBeVisible()
+    await expect(page.getByText('What is the fee?')).toHaveCount(0)
+
+    await page.getByLabel(/scope/i).selectOption({ label: 'scope-doc-b.pdf' })
+    await expect(page.getByText('What is the fee?')).toBeVisible()
+    await expect(page.getByText('What is the deadline?')).toHaveCount(0)
+  })
+
+  test('clicking an approved entry shows its answer read-only; other entries and delete are unaffected (030-golden-dataset-entry-detail US2)', async ({
+    page,
+  }) => {
+    const suffix = Date.now()
+
+    await page.setViewportSize({ width: 1600, height: 900 })
+
+    let mockedHasKey = false
+    await page.route('**/api/profile/anthropic-key', async (route) => {
+      const method = route.request().method()
+      if (method === 'PUT') {
+        mockedHasKey = true
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ hasKey: true, maskedKey: '...wxyz' }),
+        })
+        return
+      }
+      if (method === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(
+            mockedHasKey ? { hasKey: true, maskedKey: '...wxyz' } : { hasKey: false, maskedKey: null },
+          ),
+        })
+        return
+      }
+      await route.continue()
+    })
+
+    await page.goto('/')
+    await page.getByRole('button', { name: /sign up/i }).click()
+    await page.getByLabel('Email').fill(`golden-dataset-detail-${suffix}@example.com`)
+    await page.getByLabel('Password').fill('hunter22')
+    await page.getByRole('button', { name: /^sign up$/i }).click()
+    await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible()
+
+    await page.getByLabel('Profile').click()
+    await page.getByLabel(/anthropic api key/i).fill('sk-ant-testwxyz')
+    await page.getByRole('button', { name: /^save$/i }).click()
+    await expect(page.getByText('...wxyz')).toBeVisible()
+
+    const corpusName = `Golden Dataset Detail E2E ${suffix}`
+    const main = page.locator('main')
+    await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
+    await main.getByRole('button', { name: /new corpus/i }).click()
+    await main.getByLabel(/new corpus name/i).fill(corpusName)
+    await main.getByRole('button', { name: /^create$/i }).click()
+    await expect(main.getByTestId(/corpus-row-/).filter({ hasText: corpusName })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+
+    // This test is about the read-only detail view (US2), not a re-verification of the
+    // creation pipeline — stub the entries list/detail/delete endpoints directly, the same
+    // lightweight approach as the scope-filtering test above.
+    let deleted = false
+    await page.route('**/api/golden-dataset/**', async (route) => {
+      const method = route.request().method()
+      const url = route.request().url()
+      if (method === 'GET' && /\/entries\/approved-1$/.test(url)) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            id: 'approved-1',
+            corpusId: 'ignored',
+            documentId: null,
+            question: 'What is the notice period?',
+            preferredAnswer: 'Thirty days written notice.',
+            status: 'approved',
+            source: 'manual',
+            chunks: [
+              {
+                id: 'gec-1',
+                chunkId: 'chunk-1',
+                documentId: null,
+                chunkIndex: 0,
+                content: 'Either party may terminate this agreement with thirty days written notice.',
+              },
+            ],
+            createdAt: '2026-08-05T00:00:00Z',
+            updatedAt: '2026-08-05T00:00:00Z',
+            reviewedAt: '2026-08-05T00:01:00Z',
+          }),
+        })
+        return
+      }
+      if (method === 'DELETE') {
+        deleted = true
+        await route.fulfill({ status: 204 })
+        return
+      }
+      if (method === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            entries: deleted
+              ? [
+                  {
+                    id: 'pending-1',
+                    corpusId: 'ignored',
+                    documentId: null,
+                    question: 'A pending question needing review?',
+                    status: 'pending_review',
+                    source: 'llm_generated',
+                    createdAt: '2026-08-05T00:02:00Z',
+                  },
+                ]
+              : [
+                  {
+                    id: 'approved-1',
+                    corpusId: 'ignored',
+                    documentId: null,
+                    question: 'What is the notice period?',
+                    status: 'approved',
+                    source: 'manual',
+                    createdAt: '2026-08-05T00:00:00Z',
+                  },
+                  {
+                    id: 'pending-1',
+                    corpusId: 'ignored',
+                    documentId: null,
+                    question: 'A pending question needing review?',
+                    status: 'pending_review',
+                    source: 'llm_generated',
+                    createdAt: '2026-08-05T00:02:00Z',
+                  },
+                ],
+          }),
+        })
+        return
+      }
+      await route.continue()
+    })
+
+    await page.getByRole('link', { name: 'GOLDEN DATASET', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Golden Dataset' })).toBeVisible()
+    await page.getByLabel(/scope/i).selectOption('Entire Corpus')
+
+    // FR-005/FR-006: clicking an approved entry's question shows its full answer, read-only.
+    await expect(page.getByText('What is the notice period?')).toBeVisible()
+    await page.getByRole('button', { name: 'What is the notice period?', exact: true }).click()
+    await expect(page.getByText('Thirty days written notice.', { exact: true })).toBeVisible()
+    const approvedRow = page.getByTestId('golden-entry-approved-1')
+    await expect(approvedRow.locator('input, textarea')).toHaveCount(0)
+    await expect(approvedRow.getByRole('button', { name: /^save$/i })).toHaveCount(0)
+
+    // Evidence chunk list: shows the chunk's name and, on "Show more", its full content.
+    await expect(page.getByText('CHUNK_0')).toBeVisible()
+    const chunkText = page.getByText(
+      'Either party may terminate this agreement with thirty days written notice.',
+    )
+    await expect(chunkText).toHaveClass(/line-clamp-2/)
+    await page.getByRole('button', { name: /^show more$/i }).click()
+    await expect(chunkText).not.toHaveClass(/line-clamp-2/)
+    await page.getByRole('button', { name: /^show less$/i }).click()
+    await expect(chunkText).toHaveClass(/line-clamp-2/)
+
+    // FR-007: clicking a pending-review entry's question opens nothing new.
+    await page.getByRole('button', { name: 'A pending question needing review?', exact: true }).click()
+    await expect(page.getByLabel(/^question$/i)).toHaveCount(0)
+
+    // FR-009: deleting the expanded entry removes both it and its answer view together.
+    page.once('dialog', (dialog) => dialog.accept())
+    await page.getByRole('button', { name: 'Delete What is the notice period?' }).click()
+    await expect(page.getByText('What is the notice period?')).toHaveCount(0)
+    await expect(page.getByText('Thirty days written notice.')).toHaveCount(0)
   })
 })

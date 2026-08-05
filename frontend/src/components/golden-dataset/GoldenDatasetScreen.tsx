@@ -8,6 +8,7 @@ import { listSources } from '../../lib/sourcesApi'
 import type { SourceDocument } from '../../types/sourceDocument'
 import type { GoldenEntry, GoldenEntrySummary } from '../../types/goldenDataset'
 import { GoldenEntryEditor } from './GoldenEntryEditor'
+import { GoldenEntryList } from './GoldenEntryList'
 import { GoldenReviewQueue } from './GoldenReviewQueue'
 import { BatchGenerationProgress } from './BatchGenerationProgress'
 import { SourceDocumentPreview } from '../sources/SourceDocumentPreview'
@@ -15,17 +16,6 @@ import type { BatchItemResult } from '../../lib/batchRunner'
 
 export interface GoldenDatasetScreenProps {
   onNavigate: (screen: ScreenId) => void
-}
-
-const STATUS_LABELS: Record<GoldenEntrySummary['status'], string> = {
-  approved: 'Approved',
-  pending_review: 'Pending Review',
-  rejected: 'Rejected',
-}
-
-const SOURCE_LABELS: Record<GoldenEntrySummary['source'], string> = {
-  manual: 'Manual',
-  llm_generated: 'LLM-generated',
 }
 
 export function GoldenDatasetScreen({ onNavigate }: GoldenDatasetScreenProps) {
@@ -66,6 +56,14 @@ export function GoldenDatasetScreen({ onNavigate }: GoldenDatasetScreenProps) {
   const activeDocumentId = selectedDocumentId || documents[0]?.id || ''
   const isEntireCorpus = isEntireCorpusSelection(activeDocumentId)
 
+  // 030-golden-dataset-entry-detail US1: `entries` is always every entry in the corpus —
+  // narrow it to the current scope-dropdown selection before rendering anything derived from
+  // it, so the Pending Review section and the main list both stay consistent with the
+  // dropdown instead of always showing the same unfiltered set.
+  const scopedEntries = isEntireCorpus
+    ? entries
+    : entries.filter((entry) => entry.documentId === activeDocumentId)
+
   function handleSaved(_entry: GoldenEntry) {
     setIsCreatingManually(false)
     refreshEntries()
@@ -105,7 +103,7 @@ export function GoldenDatasetScreen({ onNavigate }: GoldenDatasetScreenProps) {
     refreshEntries()
   }
 
-  const pendingEntries = entries.filter((entry) => entry.status === 'pending_review')
+  const pendingEntries = scopedEntries.filter((entry) => entry.status === 'pending_review')
 
   return (
     <AppShell activeScreen="golden-dataset" onNavigate={onNavigate}>
@@ -254,33 +252,10 @@ export function GoldenDatasetScreen({ onNavigate }: GoldenDatasetScreenProps) {
                 )}
 
                 <div className="min-h-0 flex-1">
-                  {entries.length === 0 ? (
+                  {scopedEntries.length === 0 ? (
                     <p className="text-on-surface-variant">No golden dataset entries yet.</p>
                   ) : (
-                    <ul data-testid="golden-entry-list" className="flex flex-col gap-2">
-                      {entries.map((entry) => (
-                        <li
-                          key={entry.id}
-                          data-testid={`golden-entry-${entry.id}`}
-                          className="flex items-center justify-between gap-4 rounded-lg border border-outline-variant bg-surface-container p-3"
-                        >
-                          <span className="text-sm text-on-surface">{entry.question}</span>
-                          <span className="flex items-center gap-2 text-xs text-on-surface-variant">
-                            <span>{STATUS_LABELS[entry.status]}</span>
-                            <span>·</span>
-                            <span>{SOURCE_LABELS[entry.source]}</span>
-                            <button
-                              type="button"
-                              aria-label={`Delete ${entry.question}`}
-                              onClick={() => handleDelete(entry)}
-                              className="rounded border border-outline-variant px-2 py-1 text-xs text-on-surface hover:bg-surface-container-high"
-                            >
-                              Delete
-                            </button>
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
+                    <GoldenEntryList entries={scopedEntries} onDelete={handleDelete} />
                   )}
                 </div>
               </div>

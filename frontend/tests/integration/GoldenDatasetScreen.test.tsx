@@ -306,3 +306,115 @@ describe('GoldenDatasetScreen — control row below the scope dropdown (028-gold
     ).toBeTruthy()
   })
 })
+
+describe('GoldenDatasetScreen — entry list respects the scope dropdown (030-golden-dataset-entry-detail US1)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const entryOnDocA = {
+    id: 'entry-a',
+    corpusId: 'corpus-a',
+    documentId: 'doc-a',
+    question: 'Question about document A?',
+    status: 'approved',
+    source: 'manual',
+    createdAt: '2026-08-01T00:00:00Z',
+  }
+
+  const entryOnDocB = {
+    id: 'entry-b',
+    corpusId: 'corpus-a',
+    documentId: 'doc-b',
+    question: 'Question about document B?',
+    status: 'approved',
+    source: 'manual',
+    createdAt: '2026-08-01T00:05:00Z',
+  }
+
+  function stubFetch() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const href = url.toString()
+        if (href.includes('/api/corpora')) {
+          return jsonResponse({ corpora: [{ id: 'corpus-a', name: 'Corpus A', createdAt: '2026-07-14T00:00:00Z' }] })
+        }
+        if (href.includes('/api/sources')) {
+          return jsonResponse({
+            documents: [
+              { id: 'doc-a', name: 'a.pdf', sizeBytes: 10, uploadedAt: '2026-07-14T01:00:00Z', status: 'processed' },
+              { id: 'doc-b', name: 'b.pdf', sizeBytes: 20, uploadedAt: '2026-07-14T01:05:00Z', status: 'processed' },
+            ],
+            rejections: [],
+          })
+        }
+        if (href.includes('/api/golden-dataset/entries')) {
+          return jsonResponse({ entries: [entryOnDocA, entryOnDocB] })
+        }
+        throw new Error(`Unhandled request: ${href}`)
+      }),
+    )
+  }
+
+  it('shows every entry across all documents when "Entire Corpus" is selected', async () => {
+    stubFetch()
+
+    render(<GoldenDatasetScreen onNavigate={vi.fn()} />)
+
+    await screen.findByLabelText(/scope/i)
+    await userEvent.selectOptions(screen.getByLabelText(/scope/i), 'Entire Corpus')
+
+    expect(await screen.findByText('Question about document A?')).toBeInTheDocument()
+    expect(screen.getByText('Question about document B?')).toBeInTheDocument()
+  })
+
+  it('shows only that document\'s entries when a specific document is selected', async () => {
+    stubFetch()
+
+    render(<GoldenDatasetScreen onNavigate={vi.fn()} />)
+
+    // The dropdown defaults to the first document (a.pdf) per existing behavior.
+    expect(await screen.findByText('Question about document A?')).toBeInTheDocument()
+    expect(screen.queryByText('Question about document B?')).not.toBeInTheDocument()
+
+    await userEvent.selectOptions(screen.getByLabelText(/scope/i), 'b.pdf')
+
+    expect(await screen.findByText('Question about document B?')).toBeInTheDocument()
+    expect(screen.queryByText('Question about document A?')).not.toBeInTheDocument()
+  })
+
+  it('shows the empty state for a document with no entries of its own, not another document\'s or the corpus\'s', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const href = url.toString()
+        if (href.includes('/api/corpora')) {
+          return jsonResponse({ corpora: [{ id: 'corpus-a', name: 'Corpus A', createdAt: '2026-07-14T00:00:00Z' }] })
+        }
+        if (href.includes('/api/sources')) {
+          return jsonResponse({
+            documents: [
+              { id: 'doc-a', name: 'a.pdf', sizeBytes: 10, uploadedAt: '2026-07-14T01:00:00Z', status: 'processed' },
+              { id: 'doc-c', name: 'c.pdf', sizeBytes: 30, uploadedAt: '2026-07-14T01:10:00Z', status: 'processed' },
+            ],
+            rejections: [],
+          })
+        }
+        if (href.includes('/api/golden-dataset/entries')) {
+          return jsonResponse({ entries: [entryOnDocA] })
+        }
+        throw new Error(`Unhandled request: ${href}`)
+      }),
+    )
+
+    render(<GoldenDatasetScreen onNavigate={vi.fn()} />)
+
+    expect(await screen.findByText('Question about document A?')).toBeInTheDocument()
+
+    await userEvent.selectOptions(screen.getByLabelText(/scope/i), 'c.pdf')
+
+    expect(await screen.findByText(/no golden dataset entries yet/i)).toBeInTheDocument()
+    expect(screen.queryByText('Question about document A?')).not.toBeInTheDocument()
+  })
+})
