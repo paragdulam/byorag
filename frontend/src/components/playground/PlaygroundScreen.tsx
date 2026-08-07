@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AppShell } from '../layout/AppShell'
 import type { ScreenId } from '../layout/SidebarNav'
 import { usePlaygroundConversation } from '../../hooks/usePlaygroundConversation'
@@ -8,12 +8,15 @@ import { PlaygroundTurnDetail } from './PlaygroundTurnDetail'
 
 export interface PlaygroundScreenProps {
   onNavigate: (screen: ScreenId) => void
+  /** A turn to scroll to and highlight directly, per a deep link (034-more-deep-links). */
+  linkedTurnId?: string | null
 }
 
-export function PlaygroundScreen({ onNavigate }: PlaygroundScreenProps) {
+export function PlaygroundScreen({ onNavigate, linkedTurnId }: PlaygroundScreenProps) {
   const { activeCorpusId } = useCorpus()
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>('')
   const [queryText, setQueryText] = useState('')
+  const turnRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
   const { documents, context, turns, sendStatus, generatingTurnId, isBusy, send, generate } =
     usePlaygroundConversation(activeCorpusId, selectedDocumentId || null)
@@ -32,8 +35,25 @@ export function PlaygroundScreen({ onNavigate }: PlaygroundScreenProps) {
     )
   }, [documents])
 
+  useEffect(() => {
+    if (linkedTurnId != null) {
+      turnRefs.current.get(linkedTurnId)?.scrollIntoView({ block: 'center' })
+    }
+  }, [linkedTurnId, turns])
+
   const activeDocumentId = selectedDocumentId || documents[0]?.id || ''
   const isEntireCorpus = isEntireCorpusSelection(activeDocumentId)
+
+  // Deep link (034-more-deep-links): a linked turn may belong to a document other than the one
+  // currently selected, so force "Entire Corpus" scope to guarantee it's reachable — but only
+  // when it isn't already among the current scope's turns (see Vector View's/Golden Dataset's
+  // identical fix: forcing unconditionally would fight any future in-app action that reflects
+  // the current turn back into `linkedTurnId`).
+  useEffect(() => {
+    if (linkedTurnId != null && !isEntireCorpus && !turns.some((turn) => turn.id === linkedTurnId)) {
+      setSelectedDocumentId(ENTIRE_CORPUS_SELECTION)
+    }
+  }, [linkedTurnId, turns, isEntireCorpus])
 
   const handleSend = () => {
     send(queryText)
@@ -111,13 +131,25 @@ export function PlaygroundScreen({ onNavigate }: PlaygroundScreenProps) {
               className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto"
             >
               {turns.map((turn) => (
-                <PlaygroundTurnDetail
+                <div
                   key={turn.id}
-                  turn={turn}
-                  isBusy={isBusy}
-                  isGenerating={generatingTurnId === turn.id}
-                  onRetry={() => generate(turn.id)}
-                />
+                  ref={(node) => {
+                    if (node) {
+                      turnRefs.current.set(turn.id, node)
+                    } else {
+                      turnRefs.current.delete(turn.id)
+                    }
+                  }}
+                >
+                  <PlaygroundTurnDetail
+                    turn={turn}
+                    corpusId={activeCorpusId ?? ''}
+                    isBusy={isBusy}
+                    isGenerating={generatingTurnId === turn.id}
+                    isLinked={turn.id === linkedTurnId}
+                    onRetry={() => generate(turn.id)}
+                  />
+                </div>
               ))}
             </div>
 

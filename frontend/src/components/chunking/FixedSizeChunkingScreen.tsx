@@ -11,11 +11,22 @@ import { ChunkInContextPreview } from './ChunkInContextPreview'
 
 export interface FixedSizeChunkingScreenProps {
   onNavigate: (screen: ScreenId) => void
+  /** A document/chunk to select directly, per a deep link (034-more-deep-links). */
+  linkedDocumentId?: string | null
+  linkedChunkIndex?: number | null
+  /** Called whenever the selected document or chunk changes (deep link open, or a plain in-app
+   * click), so the caller can keep the URL in sync. */
+  onSelectionChanged?: (documentId: string, chunkIndex: number) => void
 }
 
 const SEPARATOR_OPTIONS = ['"\\n\\n"', '"\\n"', '" "', '""']
 
-export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenProps) {
+export function FixedSizeChunkingScreen({
+  onNavigate,
+  linkedDocumentId,
+  linkedChunkIndex,
+  onSelectionChanged,
+}: FixedSizeChunkingScreenProps) {
   const { activeCorpusId } = useCorpus()
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>('')
   const {
@@ -42,13 +53,35 @@ export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenP
   const [overlapValue, setOverlapValue] = useState(50)
   const [selectedChunkIndex, setSelectedChunkIndex] = useState(0)
 
+  // Deep link (034-more-deep-links): selects the linked document so its chunks load.
+  useEffect(() => {
+    if (linkedDocumentId != null && documents.some((doc) => doc.id === linkedDocumentId)) {
+      setSelectedDocumentId(linkedDocumentId)
+    }
+  }, [linkedDocumentId, documents])
+
   // Re-defaults to the first chunk whenever a new saved-chunks result loads
   // (023-pdf-fullscreen-chunk-view FR-007).
   useEffect(() => {
     setSelectedChunkIndex(0)
   }, [result])
 
+  // Deep link (034-more-deep-links): once the linked document's chunks load, select the linked
+  // chunk — runs after the reset-to-0 effect above so it wins for the same `result` change.
+  useEffect(() => {
+    if (linkedChunkIndex != null && result?.chunks.some((chunk) => chunk.index === linkedChunkIndex)) {
+      setSelectedChunkIndex(linkedChunkIndex)
+    }
+  }, [linkedChunkIndex, result])
+
   const isAutoLoaded = chunkOrigin === 'auto-loaded' && status === 'success'
+
+  function selectChunk(chunkIndex: number) {
+    setSelectedChunkIndex(chunkIndex)
+    if (activeDocumentId !== '') {
+      onSelectionChanged?.(activeDocumentId, chunkIndex)
+    }
+  }
 
   const handleRunChunking = () => {
     const chunkSize = Number(chunkSizeInput)
@@ -244,8 +277,9 @@ export function FixedSizeChunkingScreen({ onNavigate }: FixedSizeChunkingScreenP
                           <button
                             key={chunk.index}
                             type="button"
+                            data-testid={`fixed-size-chunk-${chunk.index}`}
                             aria-current={chunk.index === selectedChunkIndex ? 'true' : undefined}
-                            onClick={() => setSelectedChunkIndex(chunk.index)}
+                            onClick={() => selectChunk(chunk.index)}
                             className={
                               'rounded-lg border p-4 text-left ' +
                               (chunk.index === selectedChunkIndex

@@ -784,3 +784,51 @@ describe('FixedSizeChunkingScreen — in-context chunk preview (023-pdf-fullscre
     expect(screen.queryByTestId('chunk-context-preview')).not.toBeInTheDocument()
   })
 })
+
+describe('FixedSizeChunkingScreen — deep linking (034-more-deep-links)', () => {
+  it('selects the linked document and chunk on mount', () => {
+    mockState({
+      activeDocumentId: 'report.pdf',
+      status: 'success',
+      result: {
+        chunks: [
+          { index: 0, content: 'first chunk text' },
+          { index: 1, content: 'second chunk text' },
+        ],
+        totalChunks: 2,
+        strategy: 'fixed-size',
+        chunkSize: 50,
+        overlap: 0,
+      },
+    })
+
+    render(
+      <FixedSizeChunkingScreen onNavigate={vi.fn()} linkedDocumentId="report.pdf" linkedChunkIndex={1} />,
+    )
+
+    expect(screen.getByTestId('fixed-size-chunk-1')).toHaveAttribute('aria-current', 'true')
+  })
+
+  it('calls onSelectionChanged with the document id and chunk index when a chunk is clicked', async () => {
+    mockState({
+      activeDocumentId: 'report.pdf',
+      status: 'success',
+      result: {
+        chunks: [
+          { index: 0, content: 'first chunk text' },
+          { index: 1, content: 'second chunk text' },
+        ],
+        totalChunks: 2,
+        strategy: 'fixed-size',
+        chunkSize: 50,
+        overlap: 0,
+      },
+    })
+    const onSelectionChanged = vi.fn()
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} onSelectionChanged={onSelectionChanged} />)
+    await userEvent.click(screen.getByTestId('fixed-size-chunk-1'))
+
+    expect(onSelectionChanged).toHaveBeenCalledWith('report.pdf', 1)
+  })
+})

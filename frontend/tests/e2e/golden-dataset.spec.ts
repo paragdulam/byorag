@@ -195,7 +195,7 @@ test.describe('Golden Dataset', () => {
     await expect(page.getByRole('progressbar')).toHaveCount(0, { timeout: 30_000 })
 
     await page.getByRole('link', { name: 'GOLDEN DATASET', exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'Golden Dataset' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Golden Dataset', exact: true })).toBeVisible()
 
     // US1: manual creation.
     await page.getByRole('button', { name: 'Write Manually' }).click()
@@ -301,7 +301,7 @@ test.describe('Golden Dataset', () => {
     await expect(page.getByText('PROCESSED').first()).toBeVisible({ timeout: 10000 })
 
     await page.getByRole('link', { name: 'GOLDEN DATASET', exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'Golden Dataset' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Golden Dataset', exact: true })).toBeVisible()
 
     // FR-001/US1: the screen is split into a left pane and a right pane, and the right pane
     // previews the document the scope dropdown defaults to (the corpus's only document).
@@ -397,7 +397,7 @@ test.describe('Golden Dataset', () => {
     await expect(page.getByText('PROCESSED').first()).toBeVisible({ timeout: 10000 })
 
     await page.getByRole('link', { name: 'GOLDEN DATASET', exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'Golden Dataset' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Golden Dataset', exact: true })).toBeVisible()
     await expect(page.locator('.react-pdf__Page').first()).toBeVisible()
 
     // FR-002: the shared preview's page indicator shows up here too, tracking scroll position
@@ -528,7 +528,13 @@ test.describe('Golden Dataset', () => {
     })
 
     await page.getByRole('link', { name: 'GOLDEN DATASET', exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'Golden Dataset' })).toBeVisible()
+    // exact:true (032-deep-linking): this test's own corpus name ("Golden Dataset Scope E2E
+    // ...") produces a "Documents in Golden Dataset Scope E2E ..." heading on the Corpora
+    // screen whose accessible name contains "Golden Dataset" as a substring — a non-exact
+    // match could resolve against that leftover heading while the real navigation (now an
+    // async client-side route change, previously a synchronous state swap) is still in
+    // flight, letting this assertion pass before the screen has actually changed.
+    await expect(page.getByRole('heading', { name: 'Golden Dataset', exact: true })).toBeVisible()
 
     // US1 FR-002: "Entire Corpus" shows every entry across both documents.
     await page.getByLabel(/scope/i).selectOption('Entire Corpus')
@@ -685,7 +691,7 @@ test.describe('Golden Dataset', () => {
     })
 
     await page.getByRole('link', { name: 'GOLDEN DATASET', exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'Golden Dataset' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Golden Dataset', exact: true })).toBeVisible()
     await page.getByLabel(/scope/i).selectOption('Entire Corpus')
 
     // FR-005/FR-006: clicking an approved entry's question shows its full answer, read-only.

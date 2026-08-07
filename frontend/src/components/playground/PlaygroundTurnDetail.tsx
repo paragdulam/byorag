@@ -1,11 +1,16 @@
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
+import { buildTurnLink } from '../../router/urlScheme'
 import type { Turn } from '../../types/playground'
 
 export interface PlaygroundTurnDetailProps {
   turn: Turn
+  corpusId: string
   isBusy: boolean
   isGenerating: boolean
+  /** Whether this is the turn a deep link opened directly to (034-more-deep-links) — highlighted
+   * so it's easy to spot among the others. */
+  isLinked?: boolean
   onRetry: () => void
 }
 
@@ -22,7 +27,14 @@ const EMBEDDING_PREVIEW_COUNT = EMBEDDING_COLUMNS * EMBEDDING_PREVIEW_ROWS
  * owns its own expand/collapse state for its embedding preview and chunk list, since it only
  * ever renders one turn.
  */
-export function PlaygroundTurnDetail({ turn, isBusy, isGenerating, onRetry }: PlaygroundTurnDetailProps) {
+export function PlaygroundTurnDetail({
+  turn,
+  corpusId,
+  isBusy,
+  isGenerating,
+  isLinked,
+  onRetry,
+}: PlaygroundTurnDetailProps) {
   const [expandedChunkIds, setExpandedChunkIds] = useState<Set<string>>(new Set())
   const [embeddingExpanded, setEmbeddingExpanded] = useState(false)
 
@@ -43,10 +55,34 @@ export function PlaygroundTurnDetail({ turn, isBusy, isGenerating, onRetry }: Pl
     })
   }
 
+  function handleCopyLink() {
+    const path = buildTurnLink(corpusId, turn.id)
+    const url = `${window.location.origin}${path}`
+    void navigator.clipboard.writeText(url)
+  }
+
   return (
-    <div data-testid={`turn-${turn.id}`} className="flex flex-col gap-4 rounded-lg border border-outline-variant bg-surface-container p-4">
-      <div className="self-start rounded-lg bg-primary-container px-4 py-2 text-on-primary-container">
-        {turn.question}
+    <div
+      data-testid={`turn-${turn.id}`}
+      className={
+        'flex flex-col gap-4 rounded-lg border p-4 ' +
+        (isLinked
+          ? 'border-primary bg-surface-container-high'
+          : 'border-outline-variant bg-surface-container')
+      }
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="self-start rounded-lg bg-primary-container px-4 py-2 text-on-primary-container">
+          {turn.question}
+        </div>
+        <button
+          type="button"
+          aria-label={`Copy link to ${turn.question}`}
+          onClick={handleCopyLink}
+          className="shrink-0 rounded border border-outline-variant px-2 py-1 text-xs text-on-surface hover:bg-surface-container-high"
+        >
+          Copy link
+        </button>
       </div>
 
       <div>

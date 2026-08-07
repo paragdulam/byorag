@@ -458,3 +458,38 @@ describe('VectorViewScreen — Entire Corpus (018-ui-polish-batch US8)', () => {
     expect(lastHookCallArgs()[1]).toBe(ENTIRE_CORPUS_SELECTION)
   })
 })
+
+describe('VectorViewScreen — deep linking (034-more-deep-links)', () => {
+  it('forces Entire Corpus scope and selects the linked chunk, since it may belong to any document', () => {
+    mockState({
+      isEntireCorpus: true,
+      chunkGroups: [
+        {
+          documentId: 'doc-a',
+          documentName: 'a.pdf',
+          chunks: [{ id: 'chunk-a1', index: 0, content: 'a1 text' }],
+        },
+        {
+          documentId: 'doc-b',
+          documentName: 'b.pdf',
+          chunks: [{ id: 'chunk-b1', index: 0, content: 'b1 text' }],
+        },
+      ],
+    })
+
+    render(<VectorViewScreen onNavigate={vi.fn()} linkedChunkId="chunk-b1" />)
+
+    expect(screen.getByTestId('vector-view-chunk-chunk-b1')).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('calls onChunkLinked with the chunk id when a chunk is clicked', async () => {
+    const userEvent = (await import('@testing-library/user-event')).default
+    mockState()
+    const onChunkLinked = vi.fn()
+
+    render(<VectorViewScreen onNavigate={vi.fn()} onChunkLinked={onChunkLinked} />)
+    await userEvent.click(screen.getByTestId('vector-view-chunk-chunk-2'))
+
+    expect(onChunkLinked).toHaveBeenCalledWith('chunk-2')
+  })
+})

@@ -340,6 +340,30 @@ describe('DataSourcesScreen split view (021-sources-chunking-embeddings-refresh 
       ).toBeInTheDocument(),
     )
   })
+
+  it('previews the linked document directly, per a deep link (034-more-deep-links)', async () => {
+    stubFetch()
+
+    render(<DataSourcesScreen onNavigate={vi.fn()} linkedDocumentId="doc-b" />)
+
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('sources-right-pane')).getByTestId('mock-pdf-document'),
+      ).toHaveTextContent('/api/sources/doc-b/file'),
+    )
+  })
+
+  it('calls onDocumentSelected with the document id when a document is clicked', async () => {
+    stubFetch()
+    const onDocumentSelected = vi.fn()
+
+    render(<DataSourcesScreen onNavigate={vi.fn()} onDocumentSelected={onDocumentSelected} />)
+    expect(await screen.findByText('a.pdf')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'a.pdf' }))
+
+    expect(onDocumentSelected).toHaveBeenCalledWith('doc-a')
+  })
 })
 
 describe('DataSourcesScreen PDF preview fullscreen (023-pdf-fullscreen-chunk-view US1)', () => {

@@ -74,7 +74,7 @@ beforeEach(() => {
 
 describe('GoldenEntryList (030-golden-dataset-entry-detail US2)', () => {
   it('lists every entry passed in, regardless of status', () => {
-    render(<GoldenEntryList entries={[approvedA, pendingEntry, rejectedEntry]} onDelete={vi.fn()} />)
+    render(<GoldenEntryList entries={[approvedA, pendingEntry, rejectedEntry]} corpusId="corpus-1" onDelete={vi.fn()} />)
 
     expect(screen.getByText('What is the notice period?')).toBeInTheDocument()
     expect(screen.getByText('What does the passage say?')).toBeInTheDocument()
@@ -82,7 +82,7 @@ describe('GoldenEntryList (030-golden-dataset-entry-detail US2)', () => {
   })
 
   it('fetches and shows the full answer when an approved entry\'s question is clicked', async () => {
-    render(<GoldenEntryList entries={[approvedA]} onDelete={vi.fn()} />)
+    render(<GoldenEntryList entries={[approvedA]} corpusId="corpus-1" onDelete={vi.fn()} />)
 
     await userEvent.click(screen.getByRole('button', { name: 'What is the notice period?' }))
 
@@ -94,7 +94,7 @@ describe('GoldenEntryList (030-golden-dataset-entry-detail US2)', () => {
   })
 
   it('collapses on a second click without refetching', async () => {
-    render(<GoldenEntryList entries={[approvedA]} onDelete={vi.fn()} />)
+    render(<GoldenEntryList entries={[approvedA]} corpusId="corpus-1" onDelete={vi.fn()} />)
 
     await userEvent.click(screen.getByRole('button', { name: 'What is the notice period?' }))
     await waitFor(() => expect(screen.getByText('Thirty days written notice.')).toBeInTheDocument())
@@ -111,7 +111,7 @@ describe('GoldenEntryList (030-golden-dataset-entry-detail US2)', () => {
   })
 
   it('does not open anything when a pending-review entry\'s question is clicked', async () => {
-    render(<GoldenEntryList entries={[pendingEntry]} onDelete={vi.fn()} />)
+    render(<GoldenEntryList entries={[pendingEntry]} corpusId="corpus-1" onDelete={vi.fn()} />)
 
     await userEvent.click(screen.getByRole('button', { name: 'What does the passage say?' }))
 
@@ -119,7 +119,7 @@ describe('GoldenEntryList (030-golden-dataset-entry-detail US2)', () => {
   })
 
   it('does not open anything when a rejected entry\'s question is clicked', async () => {
-    render(<GoldenEntryList entries={[rejectedEntry]} onDelete={vi.fn()} />)
+    render(<GoldenEntryList entries={[rejectedEntry]} corpusId="corpus-1" onDelete={vi.fn()} />)
 
     await userEvent.click(screen.getByRole('button', { name: 'A rejected question?' }))
 
@@ -127,7 +127,7 @@ describe('GoldenEntryList (030-golden-dataset-entry-detail US2)', () => {
   })
 
   it('expanding a second approved entry does not collapse or alter the first', async () => {
-    render(<GoldenEntryList entries={[approvedA, approvedB]} onDelete={vi.fn()} />)
+    render(<GoldenEntryList entries={[approvedA, approvedB]} corpusId="corpus-1" onDelete={vi.fn()} />)
 
     await userEvent.click(screen.getByRole('button', { name: 'What is the notice period?' }))
     await waitFor(() => expect(screen.getByText('Thirty days written notice.')).toBeInTheDocument())
@@ -140,7 +140,7 @@ describe('GoldenEntryList (030-golden-dataset-entry-detail US2)', () => {
 
   it('removes both the row and its expanded answer when the entry is deleted', async () => {
     const onDelete = vi.fn()
-    const { rerender } = render(<GoldenEntryList entries={[approvedA]} onDelete={onDelete} />)
+    const { rerender } = render(<GoldenEntryList entries={[approvedA]} corpusId="corpus-1" onDelete={onDelete} />)
 
     await userEvent.click(screen.getByRole('button', { name: 'What is the notice period?' }))
     await waitFor(() => expect(screen.getByText('Thirty days written notice.')).toBeInTheDocument())
@@ -149,7 +149,7 @@ describe('GoldenEntryList (030-golden-dataset-entry-detail US2)', () => {
     expect(onDelete).toHaveBeenCalledWith(approvedA)
 
     // Simulates the parent removing the now-deleted entry from the list it passes down.
-    rerender(<GoldenEntryList entries={[]} onDelete={onDelete} />)
+    rerender(<GoldenEntryList entries={[]} corpusId="corpus-1" onDelete={onDelete} />)
 
     expect(screen.queryByText('What is the notice period?')).not.toBeInTheDocument()
     expect(screen.queryByText('Thirty days written notice.')).not.toBeInTheDocument()
@@ -174,7 +174,7 @@ describe('GoldenEntryList (030-golden-dataset-entry-detail US2)', () => {
       render(
         <GoldenEntryList
           entries={[entryOnDocOne, entryOnDocTwo]}
-          onDelete={vi.fn()}
+          corpusId="corpus-1" onDelete={vi.fn()}
           documentNames={documentNames}
         />,
       )
@@ -193,7 +193,7 @@ describe('GoldenEntryList (030-golden-dataset-entry-detail US2)', () => {
       render(
         <GoldenEntryList
           entries={[entryOnDocOne, anotherEntryOnDocOne]}
-          onDelete={vi.fn()}
+          corpusId="corpus-1" onDelete={vi.fn()}
           documentNames={documentNames}
         />,
       )
@@ -208,7 +208,7 @@ describe('GoldenEntryList (030-golden-dataset-entry-detail US2)', () => {
       render(
         <GoldenEntryList
           entries={[entryWithNoDocument]}
-          onDelete={vi.fn()}
+          corpusId="corpus-1" onDelete={vi.fn()}
           documentNames={documentNames}
         />,
       )
@@ -218,7 +218,7 @@ describe('GoldenEntryList (030-golden-dataset-entry-detail US2)', () => {
     })
 
     it('shows no headers or grouping at all when documentNames is not provided (a specific document is selected)', () => {
-      render(<GoldenEntryList entries={[entryOnDocOne, entryOnDocTwo]} onDelete={vi.fn()} />)
+      render(<GoldenEntryList entries={[entryOnDocOne, entryOnDocTwo]} corpusId="corpus-1" onDelete={vi.fn()} />)
 
       expect(screen.queryByText('contract.pdf')).not.toBeInTheDocument()
       expect(screen.queryByText('appendix.pdf')).not.toBeInTheDocument()

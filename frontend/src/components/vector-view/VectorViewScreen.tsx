@@ -10,11 +10,16 @@ import { ENTIRE_CORPUS_SELECTION, isEntireCorpusSelection } from '../../lib/enti
 
 export interface VectorViewScreenProps {
   onNavigate: (screen: ScreenId) => void
+  /** A saved chunk to select directly, per a deep link (034-more-deep-links). */
+  linkedChunkId?: string | null
+  /** Called whenever the selected chunk changes (deep link open, or a plain in-app click), so
+   * the caller can keep the URL in sync. */
+  onChunkLinked?: (chunkId: string) => void
 }
 
 const VECTOR_GRID_COLUMNS = 8
 
-export function VectorViewScreen({ onNavigate }: VectorViewScreenProps) {
+export function VectorViewScreen({ onNavigate, linkedChunkId, onChunkLinked }: VectorViewScreenProps) {
   const { activeCorpusId } = useCorpus()
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>('')
   const [selectedChunkId, setSelectedChunkId] = useState<string>('')
@@ -23,6 +28,22 @@ export function VectorViewScreen({ onNavigate }: VectorViewScreenProps) {
 
   const { documents, savedChunks, savedEmbeddings, projectionMethods, isEntireCorpus, chunkGroups } =
     useVectorView(activeCorpusId, selectedDocumentId || null, selectedChunkId || null)
+
+  // Deep link (034-more-deep-links): a linked chunk could belong to a document other than the
+  // one currently selected, so force "Entire Corpus" scope to guarantee it's reachable — but
+  // only when it actually isn't already in the current single-document scope. Without that
+  // check, this fired on *every* click (selecting a chunk pushes its id into the URL via
+  // `onChunkLinked`, which becomes the next `linkedChunkId`), yanking the scope back to Entire
+  // Corpus after every single click even within one document.
+  useEffect(() => {
+    if (
+      linkedChunkId != null &&
+      !isEntireCorpus &&
+      !savedChunks.some((chunk) => chunk.id === linkedChunkId)
+    ) {
+      setSelectedDocumentId(ENTIRE_CORPUS_SELECTION)
+    }
+  }, [linkedChunkId, savedChunks, isEntireCorpus])
 
   // Keeps selectedDocumentId/selectedChunkId themselves valid once their source lists load,
   // so the hook call above (and not just the display values below) receives the auto-selected
@@ -41,9 +62,14 @@ export function VectorViewScreen({ onNavigate }: VectorViewScreenProps) {
   const flatChunks = isEntireCorpus ? chunkGroups.flatMap((group) => group.chunks) : savedChunks
 
   useEffect(() => {
-    setSelectedChunkId((prev) => (flatChunks.some((chunk) => chunk.id === prev) ? prev : flatChunks[0]?.id ?? ''))
+    setSelectedChunkId((prev) => {
+      if (linkedChunkId != null && flatChunks.some((chunk) => chunk.id === linkedChunkId)) {
+        return linkedChunkId
+      }
+      return flatChunks.some((chunk) => chunk.id === prev) ? prev : (flatChunks[0]?.id ?? '')
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flatChunks])
+  }, [flatChunks, linkedChunkId])
 
   const activeDocumentId = selectedDocumentId || documents[0]?.id || ''
   const activeChunkId = selectedChunkId || flatChunks[0]?.id || ''
@@ -76,6 +102,7 @@ export function VectorViewScreen({ onNavigate }: VectorViewScreenProps) {
   const selectChunk = (chunkId: string) => {
     setSelectedChunkId(chunkId)
     setSelectedEmbeddingId('')
+    onChunkLinked?.(chunkId)
   }
 
   return (
@@ -140,6 +167,7 @@ export function VectorViewScreen({ onNavigate }: VectorViewScreenProps) {
                             <button
                               key={chunk.id}
                               type="button"
+                              data-testid={`vector-view-chunk-${chunk.id}`}
                               aria-label={`Select chunk ${chunk.index}`}
                               aria-pressed={chunk.id === activeChunkId}
                               onClick={() => selectChunk(chunk.id)}
@@ -168,6 +196,7 @@ export function VectorViewScreen({ onNavigate }: VectorViewScreenProps) {
                     <button
                       key={chunk.id}
                       type="button"
+                      data-testid={`vector-view-chunk-${chunk.id}`}
                       aria-label={`Select chunk ${chunk.index}`}
                       aria-pressed={chunk.id === activeChunkId}
                       onClick={() => selectChunk(chunk.id)}

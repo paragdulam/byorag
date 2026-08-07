@@ -16,9 +16,30 @@ import type { BatchItemResult } from '../../lib/batchRunner'
 
 export interface GoldenDatasetScreenProps {
   onNavigate: (screen: ScreenId) => void
+  /** An entry to open directly, per a deep link (032-deep-linking FR-007). */
+  linkedEntryId?: string | null
+  /** Called when the linked entry above is collapsed, so the caller can drop `entryId` from
+   * the URL. */
+  onCloseLinkedEntry?: () => void
+  /** Called whenever a *different* entry is expanded via a plain in-app click, so the caller
+   * can keep the URL in sync (034-more-deep-links). */
+  onEntryOpened?: (entryId: string) => void
+  /** Whether the "Write Manually" creation form should be open directly, per a deep link
+   * (034-more-deep-links). */
+  isCreatingEntry?: boolean
+  /** Called whenever the "Write Manually" form opens or closes, so the caller can keep the URL
+   * in sync. */
+  onCreatingEntryChanged?: (isCreating: boolean) => void
 }
 
-export function GoldenDatasetScreen({ onNavigate }: GoldenDatasetScreenProps) {
+export function GoldenDatasetScreen({
+  onNavigate,
+  linkedEntryId,
+  onCloseLinkedEntry,
+  onEntryOpened,
+  isCreatingEntry,
+  onCreatingEntryChanged,
+}: GoldenDatasetScreenProps) {
   const { activeCorpusId } = useCorpus()
   const [documents, setDocuments] = useState<SourceDocument[]>([])
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>('')
@@ -53,8 +74,32 @@ export function GoldenDatasetScreen({ onNavigate }: GoldenDatasetScreenProps) {
     refreshEntries()
   }, [refreshEntries])
 
+  // Deep link (034-more-deep-links): opens the "Write Manually" form directly.
+  useEffect(() => {
+    if (isCreatingEntry) {
+      setIsCreatingManually(true)
+    }
+  }, [isCreatingEntry])
+
   const activeDocumentId = selectedDocumentId || documents[0]?.id || ''
   const isEntireCorpus = isEntireCorpusSelection(activeDocumentId)
+
+  // 032-deep-linking FR-007: a deep-linked entry may belong to a document other than the one
+  // currently selected, so force "Entire Corpus" scope to guarantee it's among the rows
+  // GoldenEntryList renders — but only when it actually isn't already in the current
+  // single-document scope. Without that check, this fired on *every* click too (expanding an
+  // entry pushes its id into the URL via `onEntryOpened`, which becomes the next
+  // `linkedEntryId`), yanking the scope back to Entire Corpus after every single click even
+  // within one document (034-more-deep-links).
+  useEffect(() => {
+    if (linkedEntryId == null || isEntireCorpus) {
+      return
+    }
+    const entry = entries.find((candidate) => candidate.id === linkedEntryId)
+    if (entry !== undefined && entry.documentId !== activeDocumentId) {
+      setSelectedDocumentId(ENTIRE_CORPUS_SELECTION)
+    }
+  }, [linkedEntryId, entries, activeDocumentId, isEntireCorpus])
 
   // 030-golden-dataset-entry-detail US1: `entries` is always every entry in the corpus —
   // narrow it to the current scope-dropdown selection before rendering anything derived from
@@ -71,7 +116,13 @@ export function GoldenDatasetScreen({ onNavigate }: GoldenDatasetScreenProps) {
 
   function handleSaved(_entry: GoldenEntry) {
     setIsCreatingManually(false)
+    onCreatingEntryChanged?.(false)
     refreshEntries()
+  }
+
+  function openManualCreation() {
+    setIsCreatingManually(true)
+    onCreatingEntryChanged?.(true)
   }
 
   function handleEntryChanged(_entry: GoldenEntry) {
@@ -163,7 +214,7 @@ export function GoldenDatasetScreen({ onNavigate }: GoldenDatasetScreenProps) {
                 <div className="flex shrink-0 gap-2">
                   <button
                     type="button"
-                    onClick={() => setIsCreatingManually(true)}
+                    onClick={openManualCreation}
                     className="rounded bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:opacity-90"
                   >
                     Write Manually
@@ -257,13 +308,22 @@ export function GoldenDatasetScreen({ onNavigate }: GoldenDatasetScreenProps) {
                 )}
 
                 <div className="min-h-0 flex-1">
-                  {scopedEntries.length === 0 ? (
+                  {/* Still render the list (rather than the empty message) when a specific entry
+                      is linked, even if `scopedEntries` is momentarily/genuinely empty — that's
+                      what lets GoldenEntryList's own not-found fetch surface the precise
+                      "this entry no longer exists" message (032-deep-linking FR-009) instead of
+                      the generic empty-corpus message below. */}
+                  {scopedEntries.length === 0 && linkedEntryId == null ? (
                     <p className="text-on-surface-variant">No golden dataset entries yet.</p>
                   ) : (
                     <GoldenEntryList
                       entries={scopedEntries}
+                      corpusId={activeCorpusId}
                       onDelete={handleDelete}
                       documentNames={documentNameById}
+                      linkedEntryId={linkedEntryId}
+                      onCloseLinkedEntry={onCloseLinkedEntry}
+                      onEntryOpened={onEntryOpened}
                     />
                   )}
                 </div>

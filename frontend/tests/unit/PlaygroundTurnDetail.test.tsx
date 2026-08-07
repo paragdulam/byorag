@@ -31,7 +31,7 @@ describe('PlaygroundTurnDetail (031-playground-metrics-redesign US1)', () => {
   it('renders question, then query embedding, then chunks, then the answer, in that order', () => {
     const turn = makeTurn({ answer: 'The final answer.' })
     const { container } = render(
-      <PlaygroundTurnDetail turn={turn} isBusy={false} isGenerating={false} onRetry={vi.fn()} />,
+      <PlaygroundTurnDetail turn={turn} corpusId="corpus-1" isBusy={false} isGenerating={false} onRetry={vi.fn()} />,
     )
 
     const text = container.textContent ?? ''
@@ -48,7 +48,7 @@ describe('PlaygroundTurnDetail (031-playground-metrics-redesign US1)', () => {
 
   it('collapses the query embedding by default with a working show more/show less', async () => {
     const turn = makeTurn()
-    render(<PlaygroundTurnDetail turn={turn} isBusy={false} isGenerating={false} onRetry={vi.fn()} />)
+    render(<PlaygroundTurnDetail turn={turn} corpusId="corpus-1" isBusy={false} isGenerating={false} onRetry={vi.fn()} />)
 
     const preview = screen.getByTestId('playground-embedding-preview')
     const toggle = screen.getByRole('button', { name: /show more embedding values/i })
@@ -66,7 +66,7 @@ describe('PlaygroundTurnDetail (031-playground-metrics-redesign US1)', () => {
 
   it('collapses each retrieved chunk by default with its own show more/show less', async () => {
     const turn = makeTurn()
-    render(<PlaygroundTurnDetail turn={turn} isBusy={false} isGenerating={false} onRetry={vi.fn()} />)
+    render(<PlaygroundTurnDetail turn={turn} corpusId="corpus-1" isBusy={false} isGenerating={false} onRetry={vi.fn()} />)
 
     expect(screen.queryByText('First chunk content.')).not.toBeInTheDocument()
     expect(screen.queryByText('Second chunk content.')).not.toBeInTheDocument()
@@ -78,7 +78,7 @@ describe('PlaygroundTurnDetail (031-playground-metrics-redesign US1)', () => {
 
   it('shows a generating state and no answer while isGenerating is true', () => {
     const turn = makeTurn()
-    render(<PlaygroundTurnDetail turn={turn} isBusy={true} isGenerating={true} onRetry={vi.fn()} />)
+    render(<PlaygroundTurnDetail turn={turn} corpusId="corpus-1" isBusy={true} isGenerating={true} onRetry={vi.fn()} />)
 
     expect(screen.getByTestId('turn-turn-1-generating')).toBeInTheDocument()
     expect(screen.queryByText(/answer to/i)).not.toBeInTheDocument()
@@ -87,7 +87,7 @@ describe('PlaygroundTurnDetail (031-playground-metrics-redesign US1)', () => {
   it('shows the failure message and a retry control that calls onRetry when generation failed', async () => {
     const onRetry = vi.fn()
     const turn = makeTurn({ error: 'Failed to generate an answer. Please try again.' })
-    render(<PlaygroundTurnDetail turn={turn} isBusy={false} isGenerating={false} onRetry={onRetry} />)
+    render(<PlaygroundTurnDetail turn={turn} corpusId="corpus-1" isBusy={false} isGenerating={false} onRetry={onRetry} />)
 
     expect(screen.getByRole('alert')).toHaveTextContent(/failed to generate/i)
     await userEvent.click(screen.getByRole('button', { name: /retry generating/i }))
@@ -96,7 +96,7 @@ describe('PlaygroundTurnDetail (031-playground-metrics-redesign US1)', () => {
 
   it('renders no button labeled "Generate" anywhere', () => {
     const turn = makeTurn({ answer: 'The final answer.' })
-    render(<PlaygroundTurnDetail turn={turn} isBusy={false} isGenerating={false} onRetry={vi.fn()} />)
+    render(<PlaygroundTurnDetail turn={turn} corpusId="corpus-1" isBusy={false} isGenerating={false} onRetry={vi.fn()} />)
 
     expect(screen.queryByRole('button', { name: /^generate$/i })).not.toBeInTheDocument()
   })

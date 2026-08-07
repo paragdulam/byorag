@@ -29,6 +29,15 @@ if (typeof globalThis.IntersectionObserver === 'undefined') {
   globalThis.IntersectionObserver = MockIntersectionObserver
 }
 
+// jsdom's `window.location`/`history` persists across tests within the same file (a fresh jsdom
+// environment is only created per test *file*, not per test) — since 032-deep-linking made the
+// URL a real, meaningful piece of app state (App.tsx's router reads it on mount), a path left
+// over from a previous test would otherwise silently bleed into the next one, e.g. auto-selecting
+// whatever corpus was in a stale URL before a test's own setup runs.
+beforeEach(() => {
+  window.history.pushState({}, '', '/')
+})
+
 // Default fetch mock: routes by URL so every hook that fetches on mount
 // (useSourceDocuments, useSystemCapacity, CorpusContext) gets a sane
 // empty/ready response without a real network call, unless a test overrides

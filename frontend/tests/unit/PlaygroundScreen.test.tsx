@@ -316,3 +316,31 @@ describe('PlaygroundScreen — playground context display', () => {
     expect(screen.getByText(/no saved embeddings/i)).toBeInTheDocument()
   })
 })
+
+describe('PlaygroundScreen — deep linking (034-more-deep-links)', () => {
+  it('scrolls the linked turn into view and highlights it, per a deep link', () => {
+    Element.prototype.scrollIntoView = vi.fn()
+    const turnOne = makeTurn({ id: 'turn-1', question: 'First question?' })
+    const turnTwo = makeTurn({ id: 'turn-2', question: 'Second question?' })
+    mockState({ turns: [turnOne, turnTwo] })
+
+    render(<PlaygroundScreen onNavigate={vi.fn()} linkedTurnId="turn-2" />)
+
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled()
+    expect(screen.getByTestId('turn-turn-2').className).toContain('border-primary')
+    expect(screen.getByTestId('turn-turn-1').className).not.toContain('border-primary')
+  })
+
+  it('writes the expected shareable URL to the clipboard from a turn\'s "Copy link"', async () => {
+    const userEvent = (await import('@testing-library/user-event')).default
+    const writeText = vi.fn()
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const turn = makeTurn({ id: 'turn-9', question: 'What is the refund policy?' })
+    mockState({ turns: [turn] })
+
+    render(<PlaygroundScreen onNavigate={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: /copy link to what is the refund policy/i }))
+
+    expect(writeText.mock.calls[0][0]).toMatch(/\/playground\/[^/]*\/turn-9$/)
+  })
+})

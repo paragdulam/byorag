@@ -17,9 +17,18 @@ function formatDeletionErrorMessage(result: { id: string; reason: string | null 
 
 export interface DataSourcesScreenProps {
   onNavigate: (screen: ScreenId) => void
+  /** A document to preview directly, per a deep link (034-more-deep-links). */
+  linkedDocumentId?: string | null
+  /** Called whenever the previewed document changes (deep link open, or a plain in-app click),
+   * so the caller can keep the URL in sync. */
+  onDocumentSelected?: (documentId: string) => void
 }
 
-export function DataSourcesScreen({ onNavigate }: DataSourcesScreenProps) {
+export function DataSourcesScreen({
+  onNavigate,
+  linkedDocumentId,
+  onDocumentSelected,
+}: DataSourcesScreenProps) {
   const { activeCorpusId, corpora, isLoading: isCorporaLoading } = useCorpus()
   const {
     documents,
@@ -34,6 +43,18 @@ export function DataSourcesScreen({ onNavigate }: DataSourcesScreenProps) {
   const otherCorpora = corpora.filter((corpus) => corpus.id !== activeCorpusId)
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+
+  // Deep link (034-more-deep-links): opens straight to the linked document once it's loaded.
+  useEffect(() => {
+    if (linkedDocumentId != null && documents.some((doc) => doc.id === linkedDocumentId)) {
+      setSelectedDocumentId(linkedDocumentId)
+    }
+  }, [linkedDocumentId, documents])
+
+  function selectDocument(documentId: string) {
+    setSelectedDocumentId(documentId)
+    onDocumentSelected?.(documentId)
+  }
 
   // If the currently previewed document is deleted (or the corpus switches out from under it),
   // clear the selection rather than leaving the right pane pointed at a document that no longer
@@ -97,7 +118,7 @@ export function DataSourcesScreen({ onNavigate }: DataSourcesScreenProps) {
                   onAttachToCorpus={attachToCorpus}
                   onRemoveFromCorpus={removeFromCorpus}
                   selectedDocumentId={selectedDocumentId}
-                  onSelectDocument={setSelectedDocumentId}
+                  onSelectDocument={selectDocument}
                 />
               )}
 
