@@ -4,8 +4,7 @@ import type { ScreenId } from '../layout/SidebarNav'
 import { usePlaygroundConversation } from '../../hooks/usePlaygroundConversation'
 import { useCorpus } from '../../context/CorpusContext'
 import { ENTIRE_CORPUS_SELECTION, isEntireCorpusSelection } from '../../lib/entireCorpusSelection'
-import { ConversationPanel } from './ConversationPanel'
-import { RetrievalPanel } from './RetrievalPanel'
+import { PlaygroundTurnDetail } from './PlaygroundTurnDetail'
 
 export interface PlaygroundScreenProps {
   onNavigate: (screen: ScreenId) => void
@@ -16,18 +15,8 @@ export function PlaygroundScreen({ onNavigate }: PlaygroundScreenProps) {
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>('')
   const [queryText, setQueryText] = useState('')
 
-  const {
-    documents,
-    context,
-    turns,
-    sendStatus,
-    generatingTurnId,
-    isBusy,
-    selectedTurnId,
-    send,
-    generate,
-    selectTurn,
-  } = usePlaygroundConversation(activeCorpusId, selectedDocumentId || null)
+  const { documents, context, turns, sendStatus, generatingTurnId, isBusy, send, generate } =
+    usePlaygroundConversation(activeCorpusId, selectedDocumentId || null)
 
   // Keeps selectedDocumentId itself valid once documents load, so the hook call above
   // receives the auto-selected document — otherwise, with only one document, nothing
@@ -46,19 +35,9 @@ export function PlaygroundScreen({ onNavigate }: PlaygroundScreenProps) {
   const activeDocumentId = selectedDocumentId || documents[0]?.id || ''
   const isEntireCorpus = isEntireCorpusSelection(activeDocumentId)
 
-  // The right panel reflects the selected turn, defaulting to the most recently submitted
-  // question (spec FR-010) — User Story 2 lets the user override this by clicking a past
-  // answer (TurnBubble's onSelect, wired below).
-  const newestTurn = turns.length > 0 ? turns[turns.length - 1] : null
-  const activeTurn = selectedTurnId !== null ? (turns.find((turn) => turn.id === selectedTurnId) ?? newestTurn) : newestTurn
-
   const handleSend = () => {
     send(queryText)
     setQueryText('')
-  }
-
-  const handleGenerate = (turnId: string) => {
-    generate(turnId)
   }
 
   return (
@@ -67,7 +46,8 @@ export function PlaygroundScreen({ onNavigate }: PlaygroundScreenProps) {
         <div className="shrink-0">
           <h1 className="text-4xl font-bold tracking-tight text-on-surface">Playground</h1>
           <p className="mt-2 text-on-surface-variant">
-            Ask a question and see the most similar saved chunks, then generate an answer.
+            Ask a question and see, in sequence, its query embedding, the evidence it
+            retrieved, and its generated answer (031-playground-metrics-redesign).
           </p>
         </div>
 
@@ -123,34 +103,52 @@ export function PlaygroundScreen({ onNavigate }: PlaygroundScreenProps) {
               </p>
             )}
 
-            <div className="mt-4 flex min-h-0 flex-1 gap-6">
-              <div
-                data-testid="playground-conversation-panel"
-                className="flex min-h-0 w-1/2 flex-col rounded-lg border border-outline-variant bg-surface-container p-4"
-              >
-                <ConversationPanel
-                  turns={turns}
-                  queryText={queryText}
-                  onQueryChange={setQueryText}
-                  onSend={handleSend}
+            {/* Single full-width sequential flow (031-playground-metrics-redesign US1
+                FR-001): every turn shows its own question, query embedding, retrieved
+                evidence, and answer inline — no left/right panel split. */}
+            <div
+              data-testid="playground-turns"
+              className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto"
+            >
+              {turns.map((turn) => (
+                <PlaygroundTurnDetail
+                  key={turn.id}
+                  turn={turn}
                   isBusy={isBusy}
-                  generatingTurnId={generatingTurnId}
-                  onRetry={handleGenerate}
-                  selectedTurnId={activeTurn?.id ?? null}
-                  onSelectTurn={selectTurn}
+                  isGenerating={generatingTurnId === turn.id}
+                  onRetry={() => generate(turn.id)}
+                />
+              ))}
+            </div>
+
+            <div className="mt-4 flex shrink-0 items-end gap-3">
+              <div className="flex-1">
+                <label className="block text-sm text-on-surface-variant" htmlFor="playground-query">
+                  Question
+                </label>
+                <input
+                  id="playground-query"
+                  aria-label="Question"
+                  type="text"
+                  value={queryText}
+                  onChange={(event) => setQueryText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      handleSend()
+                    }
+                  }}
+                  className="mt-1 w-full rounded border border-outline-variant bg-surface p-2 text-on-surface"
                 />
               </div>
-              <div
-                data-testid="playground-retrieval-panel"
-                className="flex min-h-0 w-1/2 flex-col rounded-lg border border-outline-variant bg-surface-container p-4"
+              <button
+                type="button"
+                aria-label="Send"
+                onClick={handleSend}
+                disabled={isBusy || queryText.trim().length === 0}
+                className="rounded bg-primary-container px-4 py-2 text-sm font-medium text-on-primary-container disabled:opacity-50"
               >
-                <RetrievalPanel
-                  turn={activeTurn}
-                  isBusy={isBusy}
-                  isGenerating={generatingTurnId === activeTurn?.id}
-                  onGenerate={() => activeTurn && handleGenerate(activeTurn.id)}
-                />
-              </div>
+                Send
+              </button>
             </div>
           </div>
         )}

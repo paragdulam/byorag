@@ -369,6 +369,27 @@ describe('GoldenDatasetScreen — entry list respects the scope dropdown (030-go
     expect(screen.getByText('Question about document B?')).toBeInTheDocument()
   })
 
+  it('groups entries under a document-name header only when "Entire Corpus" is selected', async () => {
+    stubFetch()
+
+    render(<GoldenDatasetScreen onNavigate={vi.fn()} />)
+
+    // Defaults to a specific document (a.pdf) — no document-name headers yet.
+    await screen.findByText('Question about document A?')
+    expect(screen.queryByTestId('golden-entry-group-doc-a')).not.toBeInTheDocument()
+
+    await userEvent.selectOptions(screen.getByLabelText(/scope/i), 'Entire Corpus')
+
+    await waitFor(() => expect(screen.getByText('Question about document B?')).toBeInTheDocument())
+    const groupA = screen.getByTestId('golden-entry-group-doc-a')
+    expect(within(groupA).getByText('a.pdf')).toBeInTheDocument()
+    expect(within(groupA).getByText('Question about document A?')).toBeInTheDocument()
+
+    const groupB = screen.getByTestId('golden-entry-group-doc-b')
+    expect(within(groupB).getByText('b.pdf')).toBeInTheDocument()
+    expect(within(groupB).getByText('Question about document B?')).toBeInTheDocument()
+  })
+
   it('shows only that document\'s entries when a specific document is selected', async () => {
     stubFetch()
 

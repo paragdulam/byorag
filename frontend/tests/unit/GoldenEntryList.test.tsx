@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { GoldenEntryList } from '../../src/components/golden-dataset/GoldenEntryList'
@@ -153,5 +153,76 @@ describe('GoldenEntryList (030-golden-dataset-entry-detail US2)', () => {
 
     expect(screen.queryByText('What is the notice period?')).not.toBeInTheDocument()
     expect(screen.queryByText('Thirty days written notice.')).not.toBeInTheDocument()
+  })
+
+  describe('grouped under a document-name header (shown only when "Entire Corpus" is selected)', () => {
+    const entryOnDocOne: GoldenEntrySummary = { ...approvedA, documentId: 'doc-1' }
+    const anotherEntryOnDocOne: GoldenEntrySummary = {
+      ...approvedB,
+      id: 'entry-e',
+      question: 'A second question on doc one?',
+      documentId: 'doc-1',
+    }
+    const entryOnDocTwo: GoldenEntrySummary = { ...approvedB, documentId: 'doc-2' }
+    const entryWithNoDocument: GoldenEntrySummary = { ...pendingEntry, documentId: null }
+    const documentNames = new Map([
+      ['doc-1', 'contract.pdf'],
+      ['doc-2', 'appendix.pdf'],
+    ])
+
+    it('renders a document-name header above the group of questions belonging to it', () => {
+      render(
+        <GoldenEntryList
+          entries={[entryOnDocOne, entryOnDocTwo]}
+          onDelete={vi.fn()}
+          documentNames={documentNames}
+        />,
+      )
+
+      const groupOne = screen.getByTestId('golden-entry-group-doc-1')
+      expect(within(groupOne).getByText('contract.pdf')).toBeInTheDocument()
+      expect(within(groupOne).getByText('What is the notice period?')).toBeInTheDocument()
+      expect(within(groupOne).queryByText('What is the fee?')).not.toBeInTheDocument()
+
+      const groupTwo = screen.getByTestId('golden-entry-group-doc-2')
+      expect(within(groupTwo).getByText('appendix.pdf')).toBeInTheDocument()
+      expect(within(groupTwo).getByText('What is the fee?')).toBeInTheDocument()
+    })
+
+    it('lists every question for a document under its single shared header, not one header per question', () => {
+      render(
+        <GoldenEntryList
+          entries={[entryOnDocOne, anotherEntryOnDocOne]}
+          onDelete={vi.fn()}
+          documentNames={documentNames}
+        />,
+      )
+
+      expect(screen.getAllByText('contract.pdf')).toHaveLength(1)
+      const group = screen.getByTestId('golden-entry-group-doc-1')
+      expect(within(group).getByText('What is the notice period?')).toBeInTheDocument()
+      expect(within(group).getByText('A second question on doc one?')).toBeInTheDocument()
+    })
+
+    it('falls back to an "Entire Corpus" header for an entry with no owning document', () => {
+      render(
+        <GoldenEntryList
+          entries={[entryWithNoDocument]}
+          onDelete={vi.fn()}
+          documentNames={documentNames}
+        />,
+      )
+
+      const group = screen.getByTestId('golden-entry-group-entire-corpus')
+      expect(within(group).getByText('Entire Corpus')).toBeInTheDocument()
+    })
+
+    it('shows no headers or grouping at all when documentNames is not provided (a specific document is selected)', () => {
+      render(<GoldenEntryList entries={[entryOnDocOne, entryOnDocTwo]} onDelete={vi.fn()} />)
+
+      expect(screen.queryByText('contract.pdf')).not.toBeInTheDocument()
+      expect(screen.queryByText('appendix.pdf')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('golden-entry-group-doc-1')).not.toBeInTheDocument()
+    })
   })
 })

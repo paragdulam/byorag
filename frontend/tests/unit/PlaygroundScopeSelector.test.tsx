@@ -59,10 +59,8 @@ function mockState(overrides: Partial<UsePlaygroundConversation> = {}): UsePlayg
     sendStatus: 'idle',
     generatingTurnId: null,
     isBusy: false,
-    selectedTurnId: null,
     send: vi.fn(),
     generate: vi.fn(),
-    selectTurn: vi.fn(),
     ...overrides,
   }
   mockedUsePlaygroundConversation.mockReturnValue(state)

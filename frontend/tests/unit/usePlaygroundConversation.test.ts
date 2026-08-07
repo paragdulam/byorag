@@ -74,7 +74,7 @@ function stubFetch(
 }
 
 describe('usePlaygroundConversation — send/generate/retry/busy-lock (017 US1)', () => {
-  it('appends a new turn to the conversation on a successful send', async () => {
+  it('appends a new turn to the conversation on a successful send, and its answer eventually appears with no manual generate() call (031-playground-metrics-redesign US1)', async () => {
     stubFetch()
 
     const { result } = renderHook(() => usePlaygroundConversation('corpus-1', 'report.pdf'))
@@ -84,6 +84,21 @@ describe('usePlaygroundConversation — send/generate/retry/busy-lock (017 US1)'
 
     await waitFor(() => expect(result.current.turns).toHaveLength(1))
     expect(result.current.turns[0].question).toBe('What is this about?')
+
+    await waitFor(() => expect(result.current.turns[0].answer).toBe('An answer.'))
+  })
+
+  it('calls generate automatically, exactly once, with the new turn\'s id, immediately after a successful send (031-playground-metrics-redesign US1 FR-005)', async () => {
+    const generateSpy = vi.fn(() => jsonResponse(makeTurn({ answer: 'An answer.' })))
+    stubFetch({ generate: generateSpy })
+
+    const { result } = renderHook(() => usePlaygroundConversation('corpus-1', 'report.pdf'))
+    await waitFor(() => expect(result.current.context?.embeddingModel).toBe('bert'))
+
+    act(() => result.current.send('What is this about?'))
+
+    await waitFor(() => expect(result.current.turns[0]?.answer).toBe('An answer.'))
+    expect(generateSpy).toHaveBeenCalledTimes(1)
   })
 
   it('does not send when the query is empty or whitespace-only', async () => {
@@ -117,7 +132,7 @@ describe('usePlaygroundConversation — send/generate/retry/busy-lock (017 US1)'
     await waitFor(() => expect(result.current.isBusy).toBe(false))
   })
 
-  it('updates the matching turn in place when generate succeeds', async () => {
+  it('updates the matching turn in place once auto-generation succeeds, without duplicating turns', async () => {
     stubFetch({
       generate: () => jsonResponse(makeTurn({ answer: 'The final answer.', llmProvider: 'anthropic' })),
     })
@@ -127,13 +142,11 @@ describe('usePlaygroundConversation — send/generate/retry/busy-lock (017 US1)'
     act(() => result.current.send('What is this about?'))
     await waitFor(() => expect(result.current.turns).toHaveLength(1))
 
-    act(() => result.current.generate(result.current.turns[0].id))
-
     await waitFor(() => expect(result.current.turns[0].answer).toBe('The final answer.'))
     expect(result.current.turns).toHaveLength(1)
   })
 
-  it('records an error on the turn when generate fails, without losing other turns', async () => {
+  it('records an error on the turn when auto-generation fails, without losing other turns, and offers a retry that can be called manually (031-playground-metrics-redesign FR-008)', async () => {
     stubFetch({ generate: () => jsonResponse({ detail: 'upstream failure' }, 502) })
 
     const { result } = renderHook(() => usePlaygroundConversation('corpus-1', 'report.pdf'))
@@ -141,56 +154,15 @@ describe('usePlaygroundConversation — send/generate/retry/busy-lock (017 US1)'
     act(() => result.current.send('What is this about?'))
     await waitFor(() => expect(result.current.turns).toHaveLength(1))
 
-    act(() => result.current.generate(result.current.turns[0].id))
-
     await waitFor(() => expect(result.current.turns[0].error).toBeTruthy())
     expect(result.current.turns[0].answer).toBeNull()
     expect(result.current.isBusy).toBe(false)
-  })
-})
 
-describe('usePlaygroundConversation — turn selection (017 US2)', () => {
-  it('defaults selectedTurnId to null (meaning: show the newest turn)', async () => {
-    stubFetch()
-
-    const { result } = renderHook(() => usePlaygroundConversation('corpus-1', 'report.pdf'))
-    await waitFor(() => expect(result.current.context?.embeddingModel).toBe('bert'))
-
-    expect(result.current.selectedTurnId).toBeNull()
-  })
-
-  it('updates selectedTurnId when selectTurn is called, without any network request', async () => {
-    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url.includes('/api/playground/context')) return jsonResponse(CONTEXT_RESPONSE)
-      if (url.includes('/api/sources')) return jsonResponse(DOCUMENTS_RESPONSE)
-      throw new Error(`Unexpected fetch: ${url}`)
-    })
-    vi.stubGlobal('fetch', fetchSpy)
-
-    const { result } = renderHook(() => usePlaygroundConversation('corpus-1', 'report.pdf'))
-    await waitFor(() => expect(result.current.context?.embeddingModel).toBe('bert'))
-    const callCountBeforeSelect = fetchSpy.mock.calls.length
-
-    act(() => result.current.selectTurn('some-turn-id'))
-
-    expect(result.current.selectedTurnId).toBe('some-turn-id')
-    expect(fetchSpy.mock.calls.length).toBe(callCountBeforeSelect)
-  })
-
-  it('resets selectedTurnId back to null when a new question is sent', async () => {
-    stubFetch()
-
-    const { result } = renderHook(() => usePlaygroundConversation('corpus-1', 'report.pdf'))
-    await waitFor(() => expect(result.current.context?.embeddingModel).toBe('bert'))
-
-    act(() => result.current.selectTurn('some-turn-id'))
-    expect(result.current.selectedTurnId).toBe('some-turn-id')
-
-    act(() => result.current.send('a new question'))
-    await waitFor(() => expect(result.current.turns).toHaveLength(1))
-
-    expect(result.current.selectedTurnId).toBeNull()
+    // The manual generate() call still works as a retry path (FR-008) — it's only the
+    // automatic first attempt that's new, not the ability to retry by calling it again.
+    stubFetch({ generate: () => jsonResponse(makeTurn({ answer: 'Recovered answer.' })) })
+    act(() => result.current.generate(result.current.turns[0].id))
+    await waitFor(() => expect(result.current.turns[0].answer).toBe('Recovered answer.'))
   })
 })
 

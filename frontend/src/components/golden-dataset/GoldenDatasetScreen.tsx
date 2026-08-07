@@ -64,6 +64,11 @@ export function GoldenDatasetScreen({ onNavigate }: GoldenDatasetScreenProps) {
     ? entries
     : entries.filter((entry) => entry.documentId === activeDocumentId)
 
+  // Only built/passed when "Entire Corpus" is selected — GoldenEntryList shows each row's
+  // owning document name in that case, since the list is otherwise a mix of documents.
+  const documentNameById =
+    isEntireCorpus ? new Map(documents.map((doc) => [doc.id, doc.name])) : undefined
+
   function handleSaved(_entry: GoldenEntry) {
     setIsCreatingManually(false)
     refreshEntries()
@@ -255,7 +260,11 @@ export function GoldenDatasetScreen({ onNavigate }: GoldenDatasetScreenProps) {
                   {scopedEntries.length === 0 ? (
                     <p className="text-on-surface-variant">No golden dataset entries yet.</p>
                   ) : (
-                    <GoldenEntryList entries={scopedEntries} onDelete={handleDelete} />
+                    <GoldenEntryList
+                      entries={scopedEntries}
+                      onDelete={handleDelete}
+                      documentNames={documentNameById}
+                    />
                   )}
                 </div>
               </div>

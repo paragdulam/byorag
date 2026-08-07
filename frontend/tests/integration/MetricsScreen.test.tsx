@@ -78,42 +78,39 @@ function stubFetch() {
       if (href.includes('/api/metrics/corpora/corpus-a/pipelines')) {
         return jsonResponse({ corpusId: 'corpus-a', pipelines: PIPELINES })
       }
-      if (href.endsWith('/api/metrics/corpora')) {
-        return jsonResponse({
-          corpora: [
-            {
-              corpusId: 'corpus-a',
-              name: 'Corpus A',
-              chunkingStrategies: ['fixed-size', 'semantic'],
-              hasPipelines: true,
-            },
-          ],
-        })
-      }
       return jsonResponse({ documents: [], rejections: [] })
     }),
   )
 }
 
-describe('MetricsScreen technique switching (019-metrics-dashboard US2)', () => {
-  it('switching the technique selector updates the displayed embedding model, counts, and scores', async () => {
+describe('MetricsScreen — every pipeline for the active corpus is visible at once (031-playground-metrics-redesign US2)', () => {
+  it('shows both pipelines and their own metrics/no-scores state simultaneously, with no switcher', async () => {
     stubFetch()
     render(<App />)
 
     await userEvent.click(await screen.findByText('METRICS'))
 
-    await waitFor(() => expect(screen.getByTestId('metrics-technique')).toHaveTextContent('fixed-size'))
-    expect(screen.getByTestId('metrics-question-count')).toHaveTextContent('3')
-    expect(screen.getByTestId('metrics-retrieval-scores')).toBeInTheDocument()
-    expect(screen.getByTestId('metrics-generation-scores')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('metrics-pipeline-fixed-size-bert')).toBeInTheDocument())
+    const fixedSizePipeline = screen.getByTestId('metrics-pipeline-fixed-size-bert')
+    expect(within(fixedSizePipeline).getByTestId('metrics-technique')).toHaveTextContent('fixed-size')
+    expect(within(fixedSizePipeline).getByTestId('metrics-question-count')).toHaveTextContent('3')
+    expect(within(fixedSizePipeline).getByTestId('metrics-retrieval-scores')).toBeInTheDocument()
+    expect(within(fixedSizePipeline).getByTestId('metrics-generation-scores')).toBeInTheDocument()
 
-    const selector = screen.getByTestId('pipeline-selector')
-    await userEvent.click(within(selector).getByText('semantic'))
+    // The second pipeline is already visible too — no selector interaction needed.
+    expect(screen.queryByTestId('pipeline-selector')).not.toBeInTheDocument()
+    const semanticPipeline = screen.getByTestId('metrics-pipeline-semantic-bert')
+    expect(semanticPipeline).toHaveTextContent('semantic')
+    expect(within(semanticPipeline).getByTestId('metrics-no-scores')).toBeInTheDocument()
+  })
 
-    await waitFor(() => expect(screen.getByTestId('metrics-technique')).toHaveTextContent('semantic'))
-    expect(screen.getByTestId('metrics-question-count')).toHaveTextContent('0')
-    expect(screen.getByTestId('metrics-no-scores')).toBeInTheDocument()
-    expect(screen.queryByTestId('metrics-retrieval-scores')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('metrics-generation-scores')).not.toBeInTheDocument()
+  it('shows no in-screen corpus-picker control', async () => {
+    stubFetch()
+    render(<App />)
+
+    await userEvent.click(await screen.findByText('METRICS'))
+
+    await waitFor(() => expect(screen.getByTestId('metrics-pipeline-fixed-size-bert')).toBeInTheDocument())
+    expect(screen.queryByTestId('metrics-corpus-list')).not.toBeInTheDocument()
   })
 })

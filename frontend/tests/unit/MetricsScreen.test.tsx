@@ -1,13 +1,13 @@
-import { render as rtlRender, screen, waitFor } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { MetricsScreen } from '../../src/components/metrics/MetricsScreen'
 import { useMetrics } from '../../src/hooks/useMetrics'
 import type { UseMetrics } from '../../src/hooks/useMetrics'
 import * as metricsApi from '../../src/lib/metricsApi'
-import type { CorpusSummary, PipelineSummary } from '../../src/types/metrics'
-import { CorpusProvider } from '../../src/context/CorpusContext'
+import type { PipelineSummary } from '../../src/types/metrics'
+import { useCorpus } from '../../src/context/CorpusContext'
+import type { CorpusContextValue } from '../../src/context/CorpusContext'
 
 // AppShell -> SidebarNav reads Anthropic-key status from AuthContext
 // (025-user-profile-anthropic-key) -- mocked here since this suite predates it and isn't
@@ -25,21 +25,23 @@ vi.mock('../../src/context/AuthContext', () => ({
 }))
 
 vi.mock('../../src/hooks/useMetrics')
-
-function render(ui: ReactElement) {
-  return rtlRender(<CorpusProvider>{ui}</CorpusProvider>)
-}
+vi.mock('../../src/context/CorpusContext')
 
 const mockedUseMetrics = vi.mocked(useMetrics)
+const mockedUseCorpus = vi.mocked(useCorpus)
 
-function makeCorpus(overrides: Partial<CorpusSummary> = {}): CorpusSummary {
-  return {
-    corpusId: 'c1',
-    name: 'Product Docs',
-    chunkingStrategies: ['fixed-size'],
-    hasPipelines: true,
+function mockCorpus(overrides: Partial<CorpusContextValue> = {}): void {
+  mockedUseCorpus.mockReturnValue({
+    corpora: [{ id: 'c1', name: 'Product Docs', createdAt: '2026-07-14T00:00:00Z' }],
+    activeCorpusId: 'c1',
+    isLoading: false,
+    error: null,
+    selectCorpus: vi.fn(),
+    createCorpus: vi.fn(),
+    renameCorpus: vi.fn(),
+    deleteCorpus: vi.fn(),
     ...overrides,
-  }
+  })
 }
 
 function makePipeline(overrides: Partial<PipelineSummary> = {}): PipelineSummary {
@@ -65,20 +67,38 @@ function makePipeline(overrides: Partial<PipelineSummary> = {}): PipelineSummary
 }
 
 function mockState(overrides: Partial<UseMetrics> = {}): UseMetrics {
-  return {
-    corpora: [makeCorpus()],
-    isLoadingCorpora: false,
-    corporaError: null,
+  const state: UseMetrics = {
     pipelines: [makePipeline()],
     isLoadingPipelines: false,
     pipelinesError: null,
     ...overrides,
   }
+  mockedUseMetrics.mockReturnValue(state)
+  return state
 }
 
-describe('MetricsScreen', () => {
-  it('renders technique, embedding model, counts, and all four scores', () => {
-    mockedUseMetrics.mockReturnValue(mockState())
+describe('MetricsScreen — reflects the app-wide active corpus, no in-screen picker (031-playground-metrics-redesign US2)', () => {
+  it('shows a "select or create a corpus" prompt when no corpus is active, matching every other screen', () => {
+    mockCorpus({ activeCorpusId: null })
+    mockState()
+
+    render(<MetricsScreen onNavigate={() => {}} />)
+
+    expect(screen.getByText(/select or create a corpus/i)).toBeInTheDocument()
+  })
+
+  it('renders no corpus-picker control anywhere on the screen', () => {
+    mockCorpus()
+    mockState()
+
+    render(<MetricsScreen onNavigate={() => {}} />)
+
+    expect(screen.queryByTestId('metrics-corpus-list')).not.toBeInTheDocument()
+  })
+
+  it('renders technique, embedding model, counts, and all four scores for the active corpus\'s pipeline', () => {
+    mockCorpus()
+    mockState()
 
     render(<MetricsScreen onNavigate={() => {}} />)
 
@@ -95,9 +115,8 @@ describe('MetricsScreen', () => {
   })
 
   it('shows a not-enough-data message when there are no scores yet (FR-013)', () => {
-    mockedUseMetrics.mockReturnValue(
-      mockState({ pipelines: [makePipeline({ questionCount: 0, answerCount: 0, scores: null })] }),
-    )
+    mockCorpus()
+    mockState({ pipelines: [makePipeline({ questionCount: 0, answerCount: 0, scores: null })] })
 
     render(<MetricsScreen onNavigate={() => {}} />)
 
@@ -107,39 +126,55 @@ describe('MetricsScreen', () => {
     expect(screen.getByTestId('metrics-question-count')).toHaveTextContent('0')
   })
 
-  it('shows a no-pipeline message for a corpus with no saved chunks (FR-014)', () => {
-    mockedUseMetrics.mockReturnValue(
-      mockState({
-        corpora: [makeCorpus({ chunkingStrategies: [], hasPipelines: false })],
-        pipelines: [],
-      }),
-    )
+  it('shows a no-pipeline message for a corpus with no established pipeline yet (FR-012)', () => {
+    mockCorpus()
+    mockState({ pipelines: [] })
 
     render(<MetricsScreen onNavigate={() => {}} />)
 
     expect(screen.getByTestId('metrics-no-pipeline')).toBeInTheDocument()
     expect(screen.queryByTestId('metrics-technique')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('metrics-embedding-model')).not.toBeInTheDocument()
   })
 
-  it('shows an empty-corpora message when there are no corpora at all', () => {
-    mockedUseMetrics.mockReturnValue(mockState({ corpora: [] }))
+  it('shows a loading state while pipelines are loading', () => {
+    mockCorpus()
+    mockState({ isLoadingPipelines: true, pipelines: [] })
 
     render(<MetricsScreen onNavigate={() => {}} />)
 
-    expect(screen.getByText(/no corpora yet/i)).toBeInTheDocument()
+    expect(screen.getByText(/loading pipeline/i)).toBeInTheDocument()
+    expect(screen.queryByTestId('metrics-no-pipeline')).not.toBeInTheDocument()
   })
 
-  it('shows a loading state while corpora are loading', () => {
-    mockedUseMetrics.mockReturnValue(mockState({ isLoadingCorpora: true, corpora: [] }))
+  it('lists every pipeline for the active corpus simultaneously, each with its own four metrics, with zero clicks (FR-010/FR-011)', () => {
+    mockCorpus()
+    const secondPipeline = makePipeline({
+      chunkingStrategy: 'semantic',
+      questionCount: 0,
+      answerCount: 0,
+      scores: null,
+    })
+    mockState({ pipelines: [makePipeline(), secondPipeline] })
 
     render(<MetricsScreen onNavigate={() => {}} />)
 
-    expect(screen.getByText(/loading corpora/i)).toBeInTheDocument()
-  })
+    const first = screen.getByTestId('metrics-pipeline-fixed-size-bert')
+    expect(within(first).getByTestId('metrics-technique')).toHaveTextContent('fixed-size')
+    expect(within(first).getByTestId('metrics-retrieval-scores')).toBeInTheDocument()
 
+    const second = screen.getByTestId('metrics-pipeline-semantic-bert')
+    expect(within(second).getByTestId('metrics-technique')).toHaveTextContent('semantic')
+    expect(within(second).getByTestId('metrics-no-scores')).toBeInTheDocument()
+
+    // No switcher of any kind — no more single-pipeline selection UI.
+    expect(screen.queryByTestId('pipeline-selector')).not.toBeInTheDocument()
+  })
+})
+
+describe('MetricsScreen — Compare stays as a secondary action alongside the list (FR-015)', () => {
   it('hides the Compare action when the corpus has only one pipeline', () => {
-    mockedUseMetrics.mockReturnValue(mockState())
+    mockCorpus()
+    mockState()
 
     render(<MetricsScreen onNavigate={() => {}} />)
 
@@ -147,17 +182,18 @@ describe('MetricsScreen', () => {
   })
 
   it('opens the comparison modal with every pipeline when Compare is clicked', async () => {
+    mockCorpus()
     const secondPipeline = makePipeline({ chunkingStrategy: 'semantic', scores: null })
     vi.spyOn(metricsApi, 'fetchComparison').mockResolvedValue({
       corpusId: 'c1',
       pipelines: [makePipeline(), secondPipeline],
     })
-    mockedUseMetrics.mockReturnValue(mockState({ pipelines: [makePipeline(), secondPipeline] }))
+    mockState({ pipelines: [makePipeline(), secondPipeline] })
 
     render(<MetricsScreen onNavigate={() => {}} />)
     await userEvent.click(screen.getByTestId('metrics-compare-button'))
 
-    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
     expect(screen.getByTestId('comparison-row-fixed-size')).toBeInTheDocument()
     expect(screen.getByTestId('comparison-row-semantic')).toBeInTheDocument()
   })

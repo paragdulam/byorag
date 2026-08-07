@@ -1,4 +1,4 @@
-import { render as rtlRender, screen } from '@testing-library/react'
+import { render as rtlRender, screen, within } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { PlaygroundScreen } from '../../src/components/playground/PlaygroundScreen'
@@ -45,9 +45,12 @@ function makeDoc(overrides: Partial<SourceDocument> = {}): SourceDocument {
 function makeTurn(overrides: Partial<Turn> = {}): Turn {
   return {
     id: 'turn-1',
+    scope: 'document',
+    documentId: 'report.pdf',
+    corpusId: null,
     question: 'What is the refund policy?',
     queryEmbedding: [0.1, 0.2, 0.3],
-    chunks: [{ chunkId: 'c1', index: 0, content: 'first chunk', score: 0.9 }],
+    chunks: [{ chunkId: 'c1', documentId: 'report.pdf', index: 0, content: 'first chunk', score: 0.9 }],
     llmProvider: null,
     llmModel: null,
     prompt: null,
@@ -69,10 +72,8 @@ function mockState(overrides: Partial<UsePlaygroundConversation> = {}): UsePlayg
     sendStatus: 'idle',
     generatingTurnId: null,
     isBusy: false,
-    selectedTurnId: null,
     send: vi.fn(),
     generate: vi.fn(),
-    selectTurn: vi.fn(),
     ...overrides,
   }
   mockedUsePlaygroundConversation.mockReturnValue(state)
@@ -90,19 +91,28 @@ describe('PlaygroundScreen — standard navigation shell', () => {
   })
 })
 
-describe('PlaygroundScreen — split layout shell (017 FR-001)', () => {
-  it('renders a left conversation panel and a right retrieval panel', () => {
+describe('PlaygroundScreen — single full-width sequential layout (031-playground-metrics-redesign US1)', () => {
+  it('renders one full-width column instead of a left/right panel split', () => {
     mockState()
 
     render(<PlaygroundScreen onNavigate={vi.fn()} />)
 
-    expect(screen.getByTestId('playground-conversation-panel')).toBeInTheDocument()
-    expect(screen.getByTestId('playground-retrieval-panel')).toBeInTheDocument()
+    expect(screen.getByTestId('playground-turns')).toBeInTheDocument()
+    expect(screen.queryByTestId('playground-conversation-panel')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('playground-retrieval-panel')).not.toBeInTheDocument()
+  })
+
+  it('renders no button labeled "Generate" anywhere on the screen', () => {
+    mockState({ turns: [makeTurn()] })
+
+    render(<PlaygroundScreen onNavigate={vi.fn()} />)
+
+    expect(screen.queryByRole('button', { name: /^generate$/i })).not.toBeInTheDocument()
   })
 })
 
-describe('PlaygroundScreen — ask a question and get an answer (017 US1)', () => {
-  it('renders a question field and a send button pinned in the left panel', () => {
+describe('PlaygroundScreen — ask a question and get an answer automatically (031-playground-metrics-redesign US1)', () => {
+  it('renders a question field and a send button pinned below the turn history', () => {
     mockState()
 
     render(<PlaygroundScreen onNavigate={vi.fn()} />)
@@ -147,13 +157,12 @@ describe('PlaygroundScreen — ask a question and get an answer (017 US1)', () =
     expect(state.send).toHaveBeenCalledWith('What is the refund policy?')
   })
 
-  it('disables Send and Generate while a request is in flight (FR-013)', () => {
+  it('disables Send while a request is in flight (FR-013)', () => {
     mockState({ turns: [makeTurn()], isBusy: true })
 
     render(<PlaygroundScreen onNavigate={vi.fn()} />)
 
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Generate' })).toBeDisabled()
   })
 
   it('shows a loading indicator and does not show an answer while generating', () => {
@@ -165,18 +174,7 @@ describe('PlaygroundScreen — ask a question and get an answer (017 US1)', () =
     expect(screen.getByTestId(`turn-${turn.id}-generating`)).toBeInTheDocument()
   })
 
-  it('calls generate() with the active turn id when Generate is clicked', async () => {
-    const userEvent = (await import('@testing-library/user-event')).default
-    const turn = makeTurn()
-    const state = mockState({ turns: [turn] })
-
-    render(<PlaygroundScreen onNavigate={vi.fn()} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Generate' }))
-
-    expect(state.generate).toHaveBeenCalledWith(turn.id)
-  })
-
-  it('renders the generated answer as a single block below the question', () => {
+  it('renders the generated answer as a single block below the question, with no manual step (FR-005)', () => {
     const turn = makeTurn({ answer: 'Refunds are processed within 5 business days.' })
     mockState({ turns: [turn] })
 
@@ -197,7 +195,7 @@ describe('PlaygroundScreen — ask a question and get an answer (017 US1)', () =
     expect(screen.queryByText(turn.question)).toBeInTheDocument()
   })
 
-  it('retrying calls generate() again with the same turn id', async () => {
+  it('retrying calls generate() again with the same turn id (FR-008)', async () => {
     const userEvent = (await import('@testing-library/user-event')).default
     const turn = makeTurn({ error: 'Answer generation failed.' })
     const state = mockState({ turns: [turn] })
@@ -207,22 +205,14 @@ describe('PlaygroundScreen — ask a question and get an answer (017 US1)', () =
 
     expect(state.generate).toHaveBeenCalledWith(turn.id)
   })
-
-  it('disables Generate when the active turn has no retrieved chunks (FR-015)', () => {
-    mockState({ turns: [makeTurn({ chunks: [] })] })
-
-    render(<PlaygroundScreen onNavigate={vi.fn()} />)
-
-    expect(screen.getByRole('button', { name: 'Generate' })).toBeDisabled()
-  })
 })
 
-describe('PlaygroundScreen — inspect retrieved chunks and query embedding (017 US2)', () => {
+describe('PlaygroundScreen — every turn shows its own retrieved chunks and query embedding inline (031-playground-metrics-redesign US1)', () => {
   it('shows each retrieved chunk identified by chunk id only, with a per-chunk Show more control', () => {
     const turn = makeTurn({
       chunks: [
-        { chunkId: 'c1', index: 0, content: 'first chunk full content', score: 0.9 },
-        { chunkId: 'c2', index: 1, content: 'second chunk full content', score: 0.5 },
+        { chunkId: 'c1', documentId: 'report.pdf', index: 0, content: 'first chunk full content', score: 0.9 },
+        { chunkId: 'c2', documentId: 'report.pdf', index: 1, content: 'second chunk full content', score: 0.5 },
       ],
     })
     mockState({ turns: [turn] })
@@ -241,8 +231,8 @@ describe('PlaygroundScreen — inspect retrieved chunks and query embedding (017
     const userEvent = (await import('@testing-library/user-event')).default
     const turn = makeTurn({
       chunks: [
-        { chunkId: 'c1', index: 0, content: 'first chunk full content', score: 0.9 },
-        { chunkId: 'c2', index: 1, content: 'second chunk full content', score: 0.5 },
+        { chunkId: 'c1', documentId: 'report.pdf', index: 0, content: 'first chunk full content', score: 0.9 },
+        { chunkId: 'c2', documentId: 'report.pdf', index: 1, content: 'second chunk full content', score: 0.5 },
       ],
     })
     mockState({ turns: [turn] })
@@ -277,74 +267,31 @@ describe('PlaygroundScreen — inspect retrieved chunks and query embedding (017
     expect(screen.getByTestId('playground-embedding-preview')).toHaveTextContent('0.23')
   })
 
-  it('lays out the right panel top-to-bottom as Generate, then chunks, then embedding', () => {
-    mockState({ turns: [makeTurn()] })
-
-    render(<PlaygroundScreen onNavigate={vi.fn()} />)
-
-    const panel = screen.getByTestId('playground-retrieval-panel')
-    const html = panel.innerHTML
-    const generateIndex = html.indexOf('Generate')
-    const chunksIndex = html.indexOf('playground-chunk-list')
-    const embeddingIndex = html.indexOf('playground-embedding-preview')
-
-    expect(generateIndex).toBeGreaterThanOrEqual(0)
-    expect(generateIndex).toBeLessThan(chunksIndex)
-    expect(chunksIndex).toBeLessThan(embeddingIndex)
-  })
-
-  it('defaults the right panel to the newest turn when no turn is explicitly selected', () => {
+  it('keeps every turn fully visible and independently detailed at once — an older turn is not hidden or replaced by a newer one', () => {
     const olderTurn = makeTurn({
       id: 'turn-older',
       question: 'Older question?',
       answer: 'Older answer.',
-      chunks: [{ chunkId: 'old-chunk', index: 0, content: 'older chunk content', score: 0.8 }],
+      chunks: [{ chunkId: 'old-chunk', documentId: 'report.pdf', index: 0, content: 'older chunk content', score: 0.8 }],
     })
     const newerTurn = makeTurn({
       id: 'turn-newer',
       question: 'Newer question?',
       answer: 'Newer answer.',
-      chunks: [{ chunkId: 'new-chunk', index: 5, content: 'newer chunk content', score: 0.7 }],
+      chunks: [{ chunkId: 'new-chunk', documentId: 'report.pdf', index: 5, content: 'newer chunk content', score: 0.7 }],
     })
-    mockState({ turns: [olderTurn, newerTurn], selectedTurnId: null })
+    mockState({ turns: [olderTurn, newerTurn] })
 
     render(<PlaygroundScreen onNavigate={vi.fn()} />)
 
-    expect(screen.getByText(/CHUNK_5/)).toBeInTheDocument()
-    expect(screen.queryByText(/CHUNK_0/)).not.toBeInTheDocument()
-  })
-
-  it('shows the explicitly selected turn instead of the newest one', () => {
-    const olderTurn = makeTurn({
-      id: 'turn-older',
-      question: 'Older question?',
-      answer: 'Older answer.',
-      chunks: [{ chunkId: 'old-chunk', index: 0, content: 'older chunk content', score: 0.8 }],
-    })
-    const newerTurn = makeTurn({
-      id: 'turn-newer',
-      question: 'Newer question?',
-      answer: 'Newer answer.',
-      chunks: [{ chunkId: 'new-chunk', index: 5, content: 'newer chunk content', score: 0.7 }],
-    })
-    mockState({ turns: [olderTurn, newerTurn], selectedTurnId: 'turn-older' })
-
-    render(<PlaygroundScreen onNavigate={vi.fn()} />)
-
-    expect(screen.getByText(/CHUNK_0/)).toBeInTheDocument()
-    expect(screen.queryByText(/CHUNK_5/)).not.toBeInTheDocument()
-  })
-
-  it('calls selectTurn() with that turn\'s id when a past answer is clicked', async () => {
-    const userEvent = (await import('@testing-library/user-event')).default
-    const olderTurn = makeTurn({ id: 'turn-older', question: 'Older question?', answer: 'Older answer.' })
-    const newerTurn = makeTurn({ id: 'turn-newer', question: 'Newer question?', answer: 'Newer answer.' })
-    const state = mockState({ turns: [olderTurn, newerTurn] })
-
-    render(<PlaygroundScreen onNavigate={vi.fn()} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Answer to Older question?' }))
-
-    expect(state.selectTurn).toHaveBeenCalledWith('turn-older')
+    const olderTurnEl = screen.getByTestId('turn-turn-older')
+    const newerTurnEl = screen.getByTestId('turn-turn-newer')
+    expect(within(olderTurnEl).getByText('Older question?')).toBeInTheDocument()
+    expect(within(olderTurnEl).getByText('Older answer.')).toBeInTheDocument()
+    expect(within(olderTurnEl).getByText(/CHUNK_0/)).toBeInTheDocument()
+    expect(within(newerTurnEl).getByText('Newer question?')).toBeInTheDocument()
+    expect(within(newerTurnEl).getByText('Newer answer.')).toBeInTheDocument()
+    expect(within(newerTurnEl).getByText(/CHUNK_5/)).toBeInTheDocument()
   })
 })
 

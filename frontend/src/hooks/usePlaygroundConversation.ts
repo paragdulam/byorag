@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PlaygroundContext, Turn } from '../types/playground'
 import type { SourceDocument } from '../types/sourceDocument'
 import {
@@ -23,16 +23,14 @@ export interface UsePlaygroundConversation {
   /** Non-null while a Generate/retry request for that specific turn is in flight. */
   generatingTurnId: string | null
   /** True while any retrieval or generation request is in flight (spec FR-013) — the UI
-   * disables Send and every Generate/retry control while this is true. */
+   * disables Send while this is true. */
   isBusy: boolean
-  /** The turn whose retrieval/generation details the right panel should show. `null` means
-   * "no explicit selection" — the UI falls back to the newest turn (spec FR-010). */
-  selectedTurnId: string | null
+  /** Submits a question — retrieval and answer generation both happen automatically as one
+   * continuous action (031-playground-metrics-redesign FR-005); there is no separate manual
+   * generate step. */
   send: (query: string) => void
+  /** Retries generating an answer for a turn whose previous attempt failed (FR-008). */
   generate: (turnId: string) => void
-  /** Selects a turn to inspect (spec FR-018) — purely client-side, no network request,
-   * since the turn's data is already loaded. */
-  selectTurn: (turnId: string) => void
 }
 
 export function usePlaygroundConversation(
@@ -56,7 +54,6 @@ export function usePlaygroundConversation(
   const [turns, setTurns] = useState<Turn[]>([])
   const [sendStatus, setSendStatus] = useState<SendStatus>('idle')
   const [generatingTurnId, setGeneratingTurnId] = useState<string | null>(null)
-  const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null)
 
   useEffect(() => {
     if (corpusId === null) {
@@ -92,7 +89,6 @@ export function usePlaygroundConversation(
     setTurns([])
     setSendStatus('idle')
     setGeneratingTurnId(null)
-    setSelectedTurnId(null)
 
     if (scope === null) {
       setIsLoadingContext(false)
@@ -137,6 +133,42 @@ export function usePlaygroundConversation(
 
   const isBusy = sendStatus === 'sending' || generatingTurnId !== null
 
+  // A ref, not `isBusy`/`generatingTurnId` state, guards re-entrancy here: `generate` is now
+  // called programmatically from inside `send`'s own success callback below
+  // (031-playground-metrics-redesign FR-005), and at that point the `generate` closure in
+  // scope is the one bound to whatever `isBusy` was *when `send` started* (`sendStatus ===
+  // 'sending'`) — a state-based guard would always see that stale "busy" value and silently
+  // drop the auto-chained call. A ref is read/written synchronously regardless of render
+  // timing, so it correctly blocks only genuine re-entrancy (e.g. a rapid double-click on a
+  // manual Retry) without misfiring on the auto-chain.
+  const isGeneratingRef = useRef(false)
+
+  const generate = useCallback((turnId: string) => {
+    if (isGeneratingRef.current) {
+      return
+    }
+    isGeneratingRef.current = true
+    setGeneratingTurnId(turnId)
+
+    generateAnswer(turnId)
+      .then((updated) => {
+        setTurns((prev) => prev.map((turn) => (turn.id === turnId ? updated : turn)))
+      })
+      .catch(() => {
+        setTurns((prev) =>
+          prev.map((turn) =>
+            turn.id === turnId
+              ? { ...turn, error: 'Failed to generate an answer. Please try again.' }
+              : turn,
+          ),
+        )
+      })
+      .finally(() => {
+        isGeneratingRef.current = false
+        setGeneratingTurnId(null)
+      })
+  }, [])
+
   const send = useCallback(
     (query: string) => {
       if (scope === null || context?.embeddingModel == null || !query.trim() || isBusy) {
@@ -149,47 +181,17 @@ export function usePlaygroundConversation(
         .then((turn) => {
           setTurns((prev) => [...prev, turn])
           setSendStatus('idle')
-          setSelectedTurnId(null)
+          // Retrieval succeeded — immediately chain into answer generation for this turn
+          // (031-playground-metrics-redesign FR-005) instead of waiting for a manual trigger.
+          generate(turn.id)
         })
         .catch((error: unknown) => {
           setSendStatus(error instanceof QueryTooLongError ? 'query-too-long' : 'error')
         })
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [documentId, corpusId, context, isBusy],
+    [documentId, corpusId, context, isBusy, generate],
   )
-
-  const generate = useCallback(
-    (turnId: string) => {
-      if (isBusy) {
-        return
-      }
-
-      setGeneratingTurnId(turnId)
-
-      generateAnswer(turnId)
-        .then((updated) => {
-          setTurns((prev) => prev.map((turn) => (turn.id === turnId ? updated : turn)))
-        })
-        .catch(() => {
-          setTurns((prev) =>
-            prev.map((turn) =>
-              turn.id === turnId
-                ? { ...turn, error: 'Failed to generate an answer. Please try again.' }
-                : turn,
-            ),
-          )
-        })
-        .finally(() => {
-          setGeneratingTurnId(null)
-        })
-    },
-    [isBusy],
-  )
-
-  const selectTurn = useCallback((turnId: string) => {
-    setSelectedTurnId(turnId)
-  }, [])
 
   return {
     documents,
@@ -200,9 +202,7 @@ export function usePlaygroundConversation(
     sendStatus,
     generatingTurnId,
     isBusy,
-    selectedTurnId,
     send,
     generate,
-    selectTurn,
   }
 }

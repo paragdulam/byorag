@@ -6,11 +6,6 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status })
 }
 
-const CORPORA = [
-  { corpusId: 'c1', name: 'Product Docs', chunkingStrategies: ['fixed-size'], hasPipelines: true },
-  { corpusId: 'c2', name: 'Empty', chunkingStrategies: [], hasPipelines: false },
-]
-
 const PIPELINES = [
   {
     chunkingStrategy: 'fixed-size',
@@ -37,51 +32,50 @@ function stubFetch() {
       if (url.includes('/api/metrics/corpora/c1/pipelines')) {
         return jsonResponse({ corpusId: 'c1', pipelines: PIPELINES })
       }
-      if (url.includes('/api/metrics/corpora')) {
-        return jsonResponse({ corpora: CORPORA })
-      }
       throw new Error(`Unexpected fetch: ${url}`)
     }),
   )
 }
 
-describe('useMetrics', () => {
-  it('loads the corpora list on mount', async () => {
-    stubFetch()
-
-    const { result } = renderHook(() => useMetrics(null))
-
-    expect(result.current.isLoadingCorpora).toBe(true)
-    await waitFor(() => expect(result.current.isLoadingCorpora).toBe(false))
-    expect(result.current.corpora).toEqual(CORPORA)
-    expect(result.current.pipelines).toEqual([])
-  })
-
-  it('loads pipelines for the selected corpus', async () => {
+describe('useMetrics (031-playground-metrics-redesign US2 — no more corpus-list fetching)', () => {
+  it('loads pipelines for the given corpus id', async () => {
     stubFetch()
 
     const { result } = renderHook(() => useMetrics('c1'))
 
+    expect(result.current.isLoadingPipelines).toBe(true)
     await waitFor(() => expect(result.current.isLoadingPipelines).toBe(false))
     expect(result.current.pipelines).toEqual(PIPELINES)
   })
 
-  it('reports a corpora-fetch error', async () => {
+  it('reports a pipelines-fetch error', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('boom', { status: 500 })))
 
-    const { result } = renderHook(() => useMetrics(null))
+    const { result } = renderHook(() => useMetrics('c1'))
 
-    await waitFor(() => expect(result.current.isLoadingCorpora).toBe(false))
-    expect(result.current.corporaError).toBeTruthy()
+    await waitFor(() => expect(result.current.isLoadingPipelines).toBe(false))
+    expect(result.current.pipelinesError).toBeTruthy()
   })
 
-  it('clears pipelines when no corpus is selected', async () => {
-    stubFetch()
+  it('clears pipelines and makes no network request when no corpus is given', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
 
     const { result } = renderHook(() => useMetrics(null))
 
-    await waitFor(() => expect(result.current.isLoadingCorpora).toBe(false))
     expect(result.current.pipelines).toEqual([])
     expect(result.current.isLoadingPipelines).toBe(false)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('does not expose a corpora list, loading flag, or error on its return shape', async () => {
+    stubFetch()
+
+    const { result } = renderHook(() => useMetrics('c1'))
+    await waitFor(() => expect(result.current.isLoadingPipelines).toBe(false))
+
+    expect(result.current).not.toHaveProperty('corpora')
+    expect(result.current).not.toHaveProperty('isLoadingCorpora')
+    expect(result.current).not.toHaveProperty('corporaError')
   })
 })
