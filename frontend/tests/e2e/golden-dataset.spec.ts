@@ -205,7 +205,7 @@ test.describe('Golden Dataset', () => {
     await page.getByRole('checkbox').first().check()
     await page.getByRole('button', { name: /^save$/i }).click()
     await expect(page.getByText('What is the notice period?')).toBeVisible()
-    await expect(page.getByText('Approved').first()).toBeVisible()
+    await expect(page.getByTitle('Approved').first()).toBeVisible()
 
     // US2: single LLM generation + review + approve.
     await page.getByRole('button', { name: 'Generate with LLM' }).click()
@@ -529,11 +529,10 @@ test.describe('Golden Dataset', () => {
 
     await page.getByRole('link', { name: 'GOLDEN DATASET', exact: true }).click()
     // exact:true (032-deep-linking): this test's own corpus name ("Golden Dataset Scope E2E
-    // ...") produces a "Documents in Golden Dataset Scope E2E ..." heading on the Corpora
-    // screen whose accessible name contains "Golden Dataset" as a substring — a non-exact
-    // match could resolve against that leftover heading while the real navigation (now an
-    // async client-side route change, previously a synchronous state swap) is still in
-    // flight, letting this assertion pass before the screen has actually changed.
+    // ...") contains "Golden Dataset" as a substring — a non-exact match could resolve against
+    // a leftover heading elsewhere on the page while the real navigation (an async client-side
+    // route change) is still in flight, letting this assertion pass before the screen has
+    // actually changed.
     await expect(page.getByRole('heading', { name: 'Golden Dataset', exact: true })).toBeVisible()
 
     // US1 FR-002: "Entire Corpus" shows every entry across both documents.

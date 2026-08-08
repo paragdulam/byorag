@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import EMBEDDING_DIMENSIONS
 from app.db.models import Chunk as ChunkRow
-from app.db.models import Corpus, Document, DocumentCorpus
+from app.db.models import Corpus, Document
 from app.db.models import Embedding as EmbeddingRow
 from app.retrieval.strategies.cosine_similarity import CosineSimilarityStrategy
 
@@ -16,12 +16,10 @@ def _make_corpus(db_session: Session, name: str = "corpus") -> Corpus:
 
 def _make_document_in_corpus(db_session: Session, corpus: Corpus, name: str) -> Document:
     document = Document(
-        name=name, content_hash=f"hash-{name}-{id(name)}", content=b"x",
+        corpus_id=corpus.id, name=name, content_hash=f"hash-{name}-{id(name)}", content=b"x",
         size_bytes=10, status="processed",
     )
     db_session.add(document)
-    db_session.flush()
-    db_session.add(DocumentCorpus(document_id=document.id, corpus_id=corpus.id))
     db_session.flush()
     return document
 

@@ -51,6 +51,9 @@ def test_candidates_question_only_search_returns_results_with_matched_answer_fal
     assert len(body["candidates"]) > 0
     assert all(c["matchedAnswer"] is False for c in body["candidates"])
     assert all(c["matchedQuestion"] is True for c in body["candidates"])
+    # 033-ui-ux-polish: each candidate carries its own cosine similarity, shown on the Write
+    # Manually evidence picker.
+    assert all(isinstance(c["score"], float) for c in body["candidates"])
 
 
 def test_candidates_question_and_answer_search_labels_matched_both(

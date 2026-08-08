@@ -122,7 +122,21 @@ describe('GoldenDatasetScreen — manual creation flow (026-golden-dataset US1)'
     await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
 
     await waitFor(() => expect(screen.getByText('What is the notice period?')).toBeInTheDocument())
-    expect(screen.getByText(/approved/i)).toBeInTheDocument()
+    expect(screen.getByTitle('Approved')).toBeInTheDocument()
+  })
+
+  it('closes the Write Manually form without saving when Cancel is clicked (033-ui-ux-polish)', async () => {
+    stubFetch()
+
+    render(<GoldenDatasetScreen onNavigate={vi.fn()} />)
+    expect(await screen.findByText(/no golden dataset entries yet/i)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /write manually/i }))
+    await userEvent.type(screen.getByLabelText(/question/i), 'A question nobody will save')
+
+    await userEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
+
+    expect(screen.queryByLabelText(/question/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/no golden dataset entries yet/i)).toBeInTheDocument()
   })
 })
 
@@ -437,5 +451,96 @@ describe('GoldenDatasetScreen — entry list respects the scope dropdown (030-go
 
     expect(await screen.findByText(/no golden dataset entries yet/i)).toBeInTheDocument()
     expect(screen.queryByText('Question about document A?')).not.toBeInTheDocument()
+  })
+})
+
+describe('GoldenDatasetScreen — scope dropdown deep link (035-document-scope-deep-links)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const entryOnDocA = {
+    id: 'entry-a',
+    corpusId: 'corpus-a',
+    documentId: 'doc-a',
+    question: 'Question about document A?',
+    status: 'approved',
+    source: 'manual',
+    createdAt: '2026-08-01T00:00:00Z',
+  }
+
+  const entryOnDocB = {
+    id: 'entry-b',
+    corpusId: 'corpus-a',
+    documentId: 'doc-b',
+    question: 'Question about document B?',
+    status: 'approved',
+    source: 'manual',
+    createdAt: '2026-08-01T00:05:00Z',
+  }
+
+  function stubFetch() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const href = url.toString()
+        if (href.includes('/api/corpora')) {
+          return jsonResponse({ corpora: [{ id: 'corpus-a', name: 'Corpus A', createdAt: '2026-07-14T00:00:00Z' }] })
+        }
+        if (href.includes('/api/sources')) {
+          return jsonResponse({
+            documents: [
+              { id: 'doc-a', name: 'a.pdf', sizeBytes: 10, uploadedAt: '2026-07-14T01:00:00Z', status: 'processed' },
+              { id: 'doc-b', name: 'b.pdf', sizeBytes: 20, uploadedAt: '2026-07-14T01:05:00Z', status: 'processed' },
+            ],
+            rejections: [],
+          })
+        }
+        if (href.includes('/api/golden-dataset/entries')) {
+          return jsonResponse({ entries: [entryOnDocA, entryOnDocB] })
+        }
+        throw new Error(`Unhandled request: ${href}`)
+      }),
+    )
+  }
+
+  it('calls onDocumentSelected when the Scope dropdown changes', async () => {
+    stubFetch()
+    const onDocumentSelected = vi.fn()
+
+    render(<GoldenDatasetScreen onNavigate={vi.fn()} onDocumentSelected={onDocumentSelected} />)
+    await screen.findByText('Question about document A?')
+    await userEvent.selectOptions(screen.getByLabelText(/scope/i), 'b.pdf')
+
+    expect(onDocumentSelected).toHaveBeenCalledWith('doc-b')
+  })
+
+  it('calls onDocumentSelected with the Entire Corpus sentinel when that option is chosen', async () => {
+    stubFetch()
+    const onDocumentSelected = vi.fn()
+
+    render(<GoldenDatasetScreen onNavigate={vi.fn()} onDocumentSelected={onDocumentSelected} />)
+    await screen.findByLabelText(/scope/i)
+    await userEvent.selectOptions(screen.getByLabelText(/scope/i), 'Entire Corpus')
+
+    expect(onDocumentSelected).toHaveBeenCalledWith('__entire-corpus__')
+  })
+
+  it('opens directly on the linked document from a deep link', async () => {
+    stubFetch()
+
+    render(<GoldenDatasetScreen onNavigate={vi.fn()} linkedDocumentId="doc-b" />)
+
+    expect(await screen.findByText('Question about document B?')).toBeInTheDocument()
+    expect(screen.queryByText('Question about document A?')).not.toBeInTheDocument()
+  })
+
+  it('opens directly on Entire Corpus from a linkedDocumentId deep link', async () => {
+    stubFetch()
+
+    render(<GoldenDatasetScreen onNavigate={vi.fn()} linkedDocumentId="__entire-corpus__" />)
+
+    expect(await screen.findByText('Question about document A?')).toBeInTheDocument()
+    expect(screen.getByText('Question about document B?')).toBeInTheDocument()
   })
 })

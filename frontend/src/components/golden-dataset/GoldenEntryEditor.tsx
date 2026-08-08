@@ -35,9 +35,12 @@ export interface GoldenEntryEditorProps {
    * FR-017) instead of creating a new one. */
   initialEntry?: GoldenEntry
   onSaved: (entry: GoldenEntry) => void
+  /** Closes the editor without saving — omitted (no Cancel button rendered) if the caller has
+   * no way to dismiss it, e.g. no embedding context provides one. */
+  onCancel?: () => void
 }
 
-export function GoldenEntryEditor({ scope, initialEntry, onSaved }: GoldenEntryEditorProps) {
+export function GoldenEntryEditor({ scope, initialEntry, onSaved, onCancel }: GoldenEntryEditorProps) {
   const [question, setQuestion] = useState(initialEntry?.question ?? '')
   const [answer, setAnswer] = useState(initialEntry?.preferredAnswer ?? '')
   const [candidates, setCandidates] = useState<GoldenCandidate[]>(
@@ -305,6 +308,17 @@ export function GoldenEntryEditor({ scope, initialEntry, onSaved }: GoldenEntryE
               Approve
             </button>
           </>
+        )}
+
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isSaving}
+            className="rounded px-4 py-2 text-sm font-medium text-on-surface-variant hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
         )}
       </div>
     </div>

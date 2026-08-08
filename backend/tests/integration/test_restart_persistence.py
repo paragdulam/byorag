@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.auth import service as auth_service
 from app.config import settings
 from app.db.base import SessionLocal
-from app.db.models import Chunk, Corpus, Document, DocumentCorpus
+from app.db.models import Chunk, Corpus, Document
 from app.db.models import User
 from app.main import app
 from tests.pdf_helpers import make_words_pdf
@@ -75,11 +75,7 @@ def test_data_survives_independent_of_the_request_session(real_client: TestClien
 
             persisted_document = fresh_session.get(Document, document_id)
             assert persisted_document is not None
-
-            link = fresh_session.get(
-                DocumentCorpus, {"document_id": document_id, "corpus_id": corpus_id}
-            )
-            assert link is not None
+            assert persisted_document.corpus_id == corpus_id
 
             chunks = (
                 fresh_session.execute(select(Chunk).where(Chunk.document_id == document_id))

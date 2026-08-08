@@ -11,19 +11,31 @@ function isScreenId(value: string): value is ScreenId {
   return ALL_SCREENS.has(value as ScreenId)
 }
 
+/** Screens whose own path segment is already claimed by a different entity (chunk/entry/turn),
+ * so their document-scope selector (035-document-scope-deep-links) is carried in a `?documentId=`
+ * query param instead — `sources`/`fixed-size-chunking` already encode `documentId` directly in
+ * the path and never go through this. */
+const QUERY_DOCUMENT_SCREENS: ReadonlySet<ScreenId> = new Set([
+  'embeddings',
+  'vector-view',
+  'golden-dataset',
+  'playground',
+])
+
 /**
- * Parses a URL pathname into an `AppRoute`, per contracts/url-scheme.md. Returns `null` for `/`
- * (caller redirects to the default screen) and for any path that doesn't match a known route
- * shape — both cases are treated identically as "not found" by callers (032-deep-linking
- * data-model.md).
+ * Parses a URL pathname (plus, for some screens, its query string) into an `AppRoute`, per
+ * contracts/url-scheme.md. Returns `null` for `/` (caller redirects to the default screen) and
+ * for any path that doesn't match a known route shape — both cases are treated identically as
+ * "not found" by callers (032-deep-linking data-model.md).
  *
  * Trailing segments beyond `:corpusId` are screen-specific (see `AppRoute`'s doc comment).
  * `fixed-size-chunking` is the one screen with two trailing segments (`:documentId/:chunkIndex`)
  * because a chunk there has no stable id of its own — it's only ever addressable as "the Nth
  * chunk of this document's current chunk run" (its `Chunk` type, unlike Vector View's persisted
- * `SavedChunk`, carries no `id` field at all).
+ * `SavedChunk`, carries no `id` field at all). `search` (e.g. `location.search`) is only
+ * consulted for `QUERY_DOCUMENT_SCREENS` — every other screen ignores it entirely.
  */
-export function parseRoute(pathname: string): AppRoute | null {
+export function parseRoute(pathname: string, search: string = ''): AppRoute | null {
   const segments = pathname.split('/').filter((segment) => segment.length > 0)
 
   if (segments.length === 0) {
@@ -48,45 +60,61 @@ export function parseRoute(pathname: string): AppRoute | null {
 
   const base = baseRoute(screenSegment, corpusId)
 
-  switch (screenSegment) {
-    case 'sources': {
-      if (rest.length > 0 || fourth !== undefined) return null
-      return third === undefined ? base : { ...base, documentId: third }
-    }
-    case 'fixed-size-chunking': {
-      if (rest.length > 0) return null
-      if (third === undefined) return base
-      if (fourth === undefined) return { ...base, documentId: third }
-      const chunkIndex = Number(fourth)
-      if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || String(chunkIndex) !== fourth) {
-        return null
+  const route = ((): AppRoute | null => {
+    switch (screenSegment) {
+      case 'sources': {
+        if (rest.length > 0 || fourth !== undefined) return null
+        return third === undefined ? base : { ...base, documentId: third }
       }
-      return { ...base, documentId: third, chunkIndex }
+      case 'fixed-size-chunking': {
+        if (rest.length > 0) return null
+        if (third === undefined) return base
+        if (fourth === undefined) return { ...base, documentId: third }
+        const chunkIndex = Number(fourth)
+        if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || String(chunkIndex) !== fourth) {
+          return null
+        }
+        return { ...base, documentId: third, chunkIndex }
+      }
+      case 'vector-view': {
+        if (rest.length > 0 || fourth !== undefined) return null
+        return third === undefined ? base : { ...base, chunkId: third }
+      }
+      case 'golden-dataset': {
+        if (rest.length > 0 || fourth !== undefined) return null
+        if (third === undefined) return base
+        return third === 'new' ? { ...base, isCreatingEntry: true } : { ...base, entryId: third }
+      }
+      case 'playground': {
+        if (rest.length > 0 || fourth !== undefined) return null
+        return third === undefined ? base : { ...base, turnId: third }
+      }
+      case 'embeddings':
+      case 'metrics': {
+        if (third !== undefined || rest.length > 0) return null
+        return base
+      }
+      default:
+        return null
     }
-    case 'vector-view': {
-      if (rest.length > 0 || fourth !== undefined) return null
-      return third === undefined ? base : { ...base, chunkId: third }
-    }
-    case 'golden-dataset': {
-      if (rest.length > 0 || fourth !== undefined) return null
-      if (third === undefined) return base
-      return third === 'new' ? { ...base, isCreatingEntry: true } : { ...base, entryId: third }
-    }
-    case 'playground': {
-      if (rest.length > 0 || fourth !== undefined) return null
-      return third === undefined ? base : { ...base, turnId: third }
-    }
-    case 'embeddings':
-    case 'metrics': {
-      if (third !== undefined || rest.length > 0) return null
-      return base
-    }
-    default:
-      return null
+  })()
+
+  if (route === null) {
+    return null
   }
+
+  if (QUERY_DOCUMENT_SCREENS.has(screenSegment)) {
+    const documentId = new URLSearchParams(search).get('documentId')
+    if (documentId !== null && documentId !== '') {
+      return { ...route, documentId }
+    }
+  }
+
+  return route
 }
 
-/** Serializes an `AppRoute` into a URL pathname, per contracts/url-scheme.md. */
+/** Serializes an `AppRoute` into a URL pathname (plus, for some screens, a query string), per
+ * contracts/url-scheme.md. */
 export function buildPath(route: AppRoute): string {
   if (!isCorpusScopedScreen(route.screen)) {
     return `/${route.screen}`
@@ -98,24 +126,33 @@ export function buildPath(route: AppRoute): string {
 
   const prefix = `/${route.screen}/${route.corpusId}`
 
-  switch (route.screen) {
-    case 'sources':
-      return route.documentId !== null ? `${prefix}/${route.documentId}` : prefix
-    case 'fixed-size-chunking':
-      if (route.documentId !== null && route.chunkIndex !== null) {
-        return `${prefix}/${route.documentId}/${route.chunkIndex}`
-      }
-      return route.documentId !== null ? `${prefix}/${route.documentId}` : prefix
-    case 'vector-view':
-      return route.chunkId !== null ? `${prefix}/${route.chunkId}` : prefix
-    case 'golden-dataset':
-      if (route.isCreatingEntry) return `${prefix}/new`
-      return route.entryId !== null ? `${prefix}/${route.entryId}` : prefix
-    case 'playground':
-      return route.turnId !== null ? `${prefix}/${route.turnId}` : prefix
-    default:
-      return prefix
+  const path = ((): string => {
+    switch (route.screen) {
+      case 'sources':
+        return route.documentId !== null ? `${prefix}/${route.documentId}` : prefix
+      case 'fixed-size-chunking':
+        if (route.documentId !== null && route.chunkIndex !== null) {
+          return `${prefix}/${route.documentId}/${route.chunkIndex}`
+        }
+        return route.documentId !== null ? `${prefix}/${route.documentId}` : prefix
+      case 'vector-view':
+        return route.chunkId !== null ? `${prefix}/${route.chunkId}` : prefix
+      case 'golden-dataset':
+        if (route.isCreatingEntry) return `${prefix}/new`
+        return route.entryId !== null ? `${prefix}/${route.entryId}` : prefix
+      case 'playground':
+        return route.turnId !== null ? `${prefix}/${route.turnId}` : prefix
+      default:
+        return prefix
+    }
+  })()
+
+  if (QUERY_DOCUMENT_SCREENS.has(route.screen) && route.documentId !== null) {
+    const params = new URLSearchParams({ documentId: route.documentId })
+    return `${path}?${params.toString()}`
   }
+
+  return path
 }
 
 /** Builds the shareable path for a specific Golden Dataset entry (FR-006). */
@@ -146,4 +183,26 @@ export function buildVectorChunkLink(corpusId: string, chunkId: string): string 
 /** Builds the shareable path for a specific Playground turn. */
 export function buildTurnLink(corpusId: string, turnId: string): string {
   return buildPath({ ...baseRoute('playground', corpusId), turnId })
+}
+
+/** Builds the shareable path for the Embeddings screen's selected document/scope
+ * (035-document-scope-deep-links) — `documentId` may be a real document id or the
+ * `ENTIRE_CORPUS_SELECTION` sentinel. */
+export function buildEmbeddingsDocumentLink(corpusId: string, documentId: string): string {
+  return buildPath({ ...baseRoute('embeddings', corpusId), documentId })
+}
+
+/** Builds the shareable path for the Vector View screen's selected document/scope. */
+export function buildVectorViewDocumentLink(corpusId: string, documentId: string): string {
+  return buildPath({ ...baseRoute('vector-view', corpusId), documentId })
+}
+
+/** Builds the shareable path for the Golden Dataset screen's selected scope. */
+export function buildGoldenDatasetDocumentLink(corpusId: string, documentId: string): string {
+  return buildPath({ ...baseRoute('golden-dataset', corpusId), documentId })
+}
+
+/** Builds the shareable path for the Playground screen's selected document/scope. */
+export function buildPlaygroundDocumentLink(corpusId: string, documentId: string): string {
+  return buildPath({ ...baseRoute('playground', corpusId), documentId })
 }

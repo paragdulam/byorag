@@ -36,9 +36,20 @@ const STATUS_LABELS: Record<GoldenEntrySummary['status'], string> = {
   rejected: 'Rejected',
 }
 
+const STATUS_ICONS: Record<GoldenEntrySummary['status'], string> = {
+  approved: '✅',
+  pending_review: '⏳',
+  rejected: '❌',
+}
+
 const SOURCE_LABELS: Record<GoldenEntrySummary['source'], string> = {
-  manual: 'Manual',
-  llm_generated: 'LLM-generated',
+  manual: 'Human Generated Answer',
+  llm_generated: 'LLM Generated Answer',
+}
+
+const SOURCE_ICONS: Record<GoldenEntrySummary['source'], string> = {
+  manual: '🧑',
+  llm_generated: '🤖',
 }
 
 /** Groups entries by documentId, preserving the order each document first appears in
@@ -196,25 +207,40 @@ export function GoldenEntryList({
         }}
         className="rounded-lg border border-outline-variant bg-surface-container p-3"
       >
-        <div className="flex items-center justify-between gap-4">
-          <button
-            type="button"
-            onClick={() => handleQuestionClick(entry)}
-            className="text-left text-sm text-on-surface"
-          >
-            {entry.question}
-          </button>
-          <span className="flex items-center gap-2 text-xs text-on-surface-variant">
-            <span>{STATUS_LABELS[entry.status]}</span>
-            <span>·</span>
-            <span>{SOURCE_LABELS[entry.source]}</span>
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-1">
+            <button
+              type="button"
+              onClick={() => handleQuestionClick(entry)}
+              className="text-left text-sm text-on-surface"
+            >
+              {entry.question}
+            </button>
+            <span className="flex items-center gap-1">
+              <span
+                title={STATUS_LABELS[entry.status]}
+                aria-label={STATUS_LABELS[entry.status]}
+                className="inline-flex h-5 w-5 items-center justify-center text-base leading-none"
+              >
+                {STATUS_ICONS[entry.status]}
+              </span>
+              <span
+                title={SOURCE_LABELS[entry.source]}
+                aria-label={SOURCE_LABELS[entry.source]}
+                className="inline-flex h-5 w-5 items-center justify-center text-base leading-none"
+              >
+                {SOURCE_ICONS[entry.source]}
+              </span>
+            </span>
+          </div>
+          <span className="flex shrink-0 items-center gap-2 text-xs text-on-surface-variant">
             <button
               type="button"
               aria-label={`Copy link to ${entry.question}`}
               onClick={() => handleCopyLink(entry)}
               className="rounded border border-outline-variant px-2 py-1 text-xs text-on-surface hover:bg-surface-container-high"
             >
-              Copy link
+              🔗 Copy link
             </button>
             <button
               type="button"
@@ -222,7 +248,7 @@ export function GoldenEntryList({
               onClick={() => handleDelete(entry)}
               className="rounded border border-outline-variant px-2 py-1 text-xs text-on-surface hover:bg-surface-container-high"
             >
-              Delete
+              🗑️ Delete
             </button>
           </span>
         </div>

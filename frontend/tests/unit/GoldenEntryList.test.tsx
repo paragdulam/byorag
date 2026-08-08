@@ -72,6 +72,38 @@ beforeEach(() => {
   })
 })
 
+describe('GoldenEntryList — status/source icons and icon buttons (033-ui-ux-polish)', () => {
+  it('shows a status icon under the question, revealing "Approved"/"Rejected" text on hover', () => {
+    render(<GoldenEntryList entries={[approvedA, rejectedEntry]} corpusId="corpus-1" onDelete={vi.fn()} />)
+
+    const approvedRow = screen.getByTestId(`golden-entry-${approvedA.id}`)
+    expect(within(approvedRow).getByTitle('Approved')).toHaveTextContent('✅')
+
+    const rejectedRow = screen.getByTestId(`golden-entry-${rejectedEntry.id}`)
+    expect(within(rejectedRow).getByTitle('Rejected')).toHaveTextContent('❌')
+  })
+
+  it('shows a human icon for manually-written entries and a robot icon for LLM-generated ones', () => {
+    render(<GoldenEntryList entries={[approvedA, pendingEntry]} corpusId="corpus-1" onDelete={vi.fn()} />)
+
+    const manualRow = screen.getByTestId(`golden-entry-${approvedA.id}`)
+    expect(within(manualRow).getByTitle('Human Generated Answer')).toHaveTextContent('🧑')
+
+    const llmRow = screen.getByTestId(`golden-entry-${pendingEntry.id}`)
+    expect(within(llmRow).getByTitle('LLM Generated Answer')).toHaveTextContent('🤖')
+  })
+
+  it('renders Copy link and Delete as icon buttons, with the icon leading the label', () => {
+    render(<GoldenEntryList entries={[approvedA]} corpusId="corpus-1" onDelete={vi.fn()} />)
+
+    const copyLinkButton = screen.getByRole('button', { name: /copy link to what is the notice period\?/i })
+    expect(copyLinkButton).toHaveTextContent('🔗 Copy link')
+
+    const deleteButton = screen.getByRole('button', { name: /delete what is the notice period\?/i })
+    expect(deleteButton).toHaveTextContent('🗑️ Delete')
+  })
+})
+
 describe('GoldenEntryList (030-golden-dataset-entry-detail US2)', () => {
   it('lists every entry passed in, regardless of status', () => {
     render(<GoldenEntryList entries={[approvedA, pendingEntry, rejectedEntry]} corpusId="corpus-1" onDelete={vi.fn()} />)

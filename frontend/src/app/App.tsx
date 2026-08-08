@@ -33,6 +33,11 @@ function AuthenticatedAppRoutes() {
     navigateToDocument,
     navigateToChunkingChunk,
     navigateToVectorChunk,
+    navigateToChunkingDocument,
+    navigateToEmbeddingsDocument,
+    navigateToVectorViewDocument,
+    navigateToGoldenDatasetDocument,
+    navigateToPlaygroundDocument,
   } = useAppNavigate()
   const { corpora, isLoading: corporaLoading } = useCorpus()
 
@@ -77,7 +82,12 @@ function AuthenticatedAppRoutes() {
   const routeCorpusId = route.corpusId
 
   return activeScreen === 'corpora' ? (
-    <CorporaScreen onNavigate={navigateToScreen} />
+    <CorporaScreen
+      onNavigate={navigateToScreen}
+      onDocumentOpen={(corpusId, documentId) =>
+        navigateToDocument(corpusId, documentId, { replace: false })
+      }
+    />
   ) : activeScreen === 'fixed-size-chunking' ? (
     <FixedSizeChunkingScreen
       onNavigate={navigateToScreen}
@@ -88,15 +98,34 @@ function AuthenticatedAppRoutes() {
           ? (documentId, chunkIndex) => navigateToChunkingChunk(routeCorpusId, documentId, chunkIndex)
           : undefined
       }
+      onDocumentSelected={
+        routeCorpusId !== null
+          ? (documentId) => navigateToChunkingDocument(routeCorpusId, documentId)
+          : undefined
+      }
     />
   ) : activeScreen === 'embeddings' ? (
-    <EmbeddingsScreen onNavigate={navigateToScreen} />
+    <EmbeddingsScreen
+      onNavigate={navigateToScreen}
+      linkedDocumentId={route.documentId}
+      onDocumentSelected={
+        routeCorpusId !== null
+          ? (documentId) => navigateToEmbeddingsDocument(routeCorpusId, documentId)
+          : undefined
+      }
+    />
   ) : activeScreen === 'vector-view' ? (
     <VectorViewScreen
       onNavigate={navigateToScreen}
       linkedChunkId={route.chunkId}
       onChunkLinked={
         routeCorpusId !== null ? (chunkId) => navigateToVectorChunk(routeCorpusId, chunkId) : undefined
+      }
+      linkedDocumentId={route.documentId}
+      onDocumentSelected={
+        routeCorpusId !== null
+          ? (documentId) => navigateToVectorViewDocument(routeCorpusId, documentId)
+          : undefined
       }
     />
   ) : activeScreen === 'golden-dataset' ? (
@@ -114,9 +143,29 @@ function AuthenticatedAppRoutes() {
               isCreating ? navigateToNewEntry(routeCorpusId) : closeEntry(routeCorpusId)
           : undefined
       }
+      linkedDocumentId={route.documentId}
+      onDocumentSelected={
+        routeCorpusId !== null
+          ? (documentId) => navigateToGoldenDatasetDocument(routeCorpusId, documentId)
+          : undefined
+      }
     />
   ) : activeScreen === 'playground' ? (
-    <PlaygroundScreen onNavigate={navigateToScreen} linkedTurnId={route.turnId} />
+    <PlaygroundScreen
+      onNavigate={navigateToScreen}
+      linkedTurnId={route.turnId}
+      onGoToChunk={
+        routeCorpusId !== null
+          ? (documentId, chunkIndex) => navigateToChunkingChunk(routeCorpusId, documentId, chunkIndex)
+          : undefined
+      }
+      linkedDocumentId={route.documentId}
+      onDocumentSelected={
+        routeCorpusId !== null
+          ? (documentId) => navigateToPlaygroundDocument(routeCorpusId, documentId)
+          : undefined
+      }
+    />
   ) : activeScreen === 'metrics' ? (
     <MetricsScreen onNavigate={navigateToScreen} />
   ) : activeScreen === 'profile' ? (

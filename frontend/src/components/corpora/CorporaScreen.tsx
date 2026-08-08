@@ -1,17 +1,15 @@
-import { useEffect, useMemo, useState, type SubmitEvent } from 'react'
+import { useEffect, useState, type SubmitEvent } from 'react'
 import { AppShell } from '../layout/AppShell'
 import type { ScreenId } from '../layout/SidebarNav'
 import { useCorpus } from '../../context/CorpusContext'
-import {
-  attachDocumentToCorpus,
-  listAllSources,
-  listSources,
-  removeDocumentFromCorpus,
-} from '../../lib/sourcesApi'
-import type { DocumentWithCorpora, SourceDocument } from '../../types/sourceDocument'
+import { deleteSources, listSources } from '../../lib/sourcesApi'
+import { buildDocumentLink } from '../../router/urlScheme'
+import { ConfirmModal } from '../shared/ConfirmModal'
+import type { SourceDocument } from '../../types/sourceDocument'
 
 export interface CorporaScreenProps {
   onNavigate: (screen: ScreenId) => void
+  onDocumentOpen?: (corpusId: string, documentId: string) => void
 }
 
 const DOCUMENT_PREVIEW_LIMIT = 5
@@ -21,11 +19,15 @@ function CorpusRowDocumentPreview({
   documents,
   isExpanded,
   onToggleExpanded,
+  onDocumentOpen,
+  onDeleteDocument,
 }: {
   corpusId: string
-  documents: DocumentWithCorpora[]
+  documents: SourceDocument[]
   isExpanded: boolean
   onToggleExpanded: () => void
+  onDocumentOpen?: (corpusId: string, documentId: string) => void
+  onDeleteDocument: (document: SourceDocument) => void
 }) {
   if (documents.length === 0) {
     return (
@@ -39,9 +41,28 @@ function CorpusRowDocumentPreview({
 
   return (
     <div data-testid={`corpus-row-${corpusId}-documents`}>
-      <ul className="flex flex-col gap-1 text-sm text-on-surface-variant">
+      <ul className="flex flex-col gap-1">
         {visibleDocuments.map((doc) => (
-          <li key={doc.id}>{doc.name}</li>
+          <li key={doc.id} className="flex items-center gap-2 text-sm">
+            <a
+              href={buildDocumentLink(corpusId, doc.id)}
+              onClick={(event) => {
+                event.preventDefault()
+                onDocumentOpen?.(corpusId, doc.id)
+              }}
+              className="text-on-surface underline hover:text-primary"
+            >
+              {doc.name}
+            </a>
+            <button
+              type="button"
+              aria-label={`Delete ${doc.name}`}
+              onClick={() => onDeleteDocument(doc)}
+              className="leading-none hover:opacity-70"
+            >
+              🗑️
+            </button>
+          </li>
         ))}
       </ul>
       {documents.length > DOCUMENT_PREVIEW_LIMIT && (
@@ -57,160 +78,27 @@ function CorpusRowDocumentPreview({
   )
 }
 
-function CorpusDocumentsPanel({
-  corpusId,
-  corpusName,
-  onDocumentsChanged,
-}: {
-  corpusId: string
-  corpusName: string
-  onDocumentsChanged: () => void
-}) {
-  const [documents, setDocuments] = useState<SourceDocument[]>([])
-  const [allDocuments, setAllDocuments] = useState<DocumentWithCorpora[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const refresh = () => {
-    setIsLoading(true)
-    Promise.all([listSources(corpusId), listAllSources()])
-      .then(([scoped, all]) => {
-        setDocuments(scoped)
-        setAllDocuments(all)
-      })
-      .finally(() => setIsLoading(false))
-  }
-
-  useEffect(() => {
-    refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [corpusId])
-
-  const candidates = allDocuments.filter((doc) => !doc.corpusIds.includes(corpusId))
-
-  const handleAttach = async (documentId: string) => {
-    if (!documentId) {
-      return
-    }
-    try {
-      await attachDocumentToCorpus(documentId, corpusId)
-      refresh()
-      // Keeps each corpus row's own document preview (018-ui-polish-batch US7) in sync —
-      // it's driven by a separate, screen-level fetch of the same data, not this panel's.
-      onDocumentsChanged()
-    } catch (attachError) {
-      setError(attachError instanceof Error ? attachError.message : 'Failed to add document')
-    }
-  }
-
-  const handleRemove = async (documentId: string) => {
-    try {
-      await removeDocumentFromCorpus(documentId, corpusId)
-      refresh()
-      onDocumentsChanged()
-    } catch (removeError) {
-      setError(removeError instanceof Error ? removeError.message : 'Failed to remove document')
-    }
-  }
-
-  return (
-    <div className="mt-6 rounded-lg border border-outline-variant bg-surface-container p-6">
-      <h2 className="text-xl font-semibold text-on-surface">Documents in {corpusName}</h2>
-
-      {error && (
-        <p role="alert" className="mt-3 text-sm text-error">
-          {error}
-        </p>
-      )}
-
-      {isLoading ? (
-        <p className="mt-4 text-on-surface-variant" role="status">
-          Loading documents…
-        </p>
-      ) : (
-        <>
-          {documents.length === 0 ? (
-            <p className="mt-4 text-on-surface-variant">No documents in this corpus yet.</p>
-          ) : (
-            <ul className="mt-4 flex flex-col gap-2" data-testid="corpus-documents-list">
-              {documents.map((doc) => (
-                <li
-                  key={doc.id}
-                  className="flex items-center justify-between rounded border border-outline-variant px-4 py-2"
-                >
-                  <span className="text-on-surface">{doc.name}</span>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${doc.name} from this corpus`}
-                    onClick={() => handleRemove(doc.id)}
-                    className="rounded border border-outline-variant px-3 py-1 text-sm text-on-surface hover:bg-surface-container-high"
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="mt-4">
-            <label htmlFor="add-existing-document" className="sr-only">
-              Add existing document to {corpusName}
-            </label>
-            <select
-              id="add-existing-document"
-              aria-label={`Add existing document to ${corpusName}`}
-              defaultValue=""
-              disabled={candidates.length === 0}
-              onChange={(event) => {
-                void handleAttach(event.target.value)
-                event.target.value = ''
-              }}
-              className="rounded border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface disabled:opacity-50"
-            >
-              <option value="" disabled>
-                {candidates.length === 0 ? 'No other documents to add' : 'Add existing document…'}
-              </option>
-              {candidates.map((doc) => (
-                <option key={doc.id} value={doc.id}>
-                  {doc.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-export function CorporaScreen({ onNavigate }: CorporaScreenProps) {
+export function CorporaScreen({ onNavigate, onDocumentOpen }: CorporaScreenProps) {
   const { corpora, activeCorpusId, isLoading, selectCorpus, createCorpus, deleteCorpus } = useCorpus()
   const [isCreating, setIsCreating] = useState(false)
   const [newCorpusName, setNewCorpusName] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [allDocuments, setAllDocuments] = useState<DocumentWithCorpora[]>([])
+  const [documentsByCorpus, setDocumentsByCorpus] = useState<Map<string, SourceDocument[]>>(new Map())
   const [expandedCorpusIds, setExpandedCorpusIds] = useState<Set<string>>(new Set())
+  const [pendingDeleteDocument, setPendingDeleteDocument] = useState<SourceDocument | null>(null)
+  const [deleteDocumentError, setDeleteDocumentError] = useState<string | null>(null)
 
   const refreshAllDocuments = () => {
-    listAllSources().then(setAllDocuments)
+    Promise.all(
+      corpora.map((corpus) => listSources(corpus.id).then((docs) => [corpus.id, docs] as const)),
+    ).then((entries) => setDocumentsByCorpus(new Map(entries)))
   }
 
   useEffect(() => {
     refreshAllDocuments()
-  }, [])
-
-  const documentsByCorpus = useMemo(() => {
-    const map = new Map<string, DocumentWithCorpora[]>()
-    for (const doc of allDocuments) {
-      for (const corpusId of doc.corpusIds) {
-        const list = map.get(corpusId) ?? []
-        list.push(doc)
-        map.set(corpusId, list)
-      }
-    }
-    return map
-  }, [allDocuments])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [corpora])
 
   const toggleExpanded = (corpusId: string) => {
     setExpandedCorpusIds((prev) => {
@@ -223,8 +111,6 @@ export function CorporaScreen({ onNavigate }: CorporaScreenProps) {
       return next
     })
   }
-
-  const activeCorpus = corpora.find((corpus) => corpus.id === activeCorpusId) ?? null
 
   const handleCreateSubmit = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -251,6 +137,17 @@ export function CorporaScreen({ onNavigate }: CorporaScreenProps) {
       await deleteCorpus(id)
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : 'Failed to delete corpus')
+    }
+  }
+
+  const handleConfirmDeleteDocument = async (document: SourceDocument) => {
+    try {
+      await deleteSources([document.id])
+      setPendingDeleteDocument(null)
+      refreshAllDocuments()
+    } catch (error) {
+      setDeleteDocumentError(error instanceof Error ? error.message : 'Failed to delete document')
+      setPendingDeleteDocument(null)
     }
   }
 
@@ -331,6 +228,12 @@ export function CorporaScreen({ onNavigate }: CorporaScreenProps) {
             </p>
           )}
 
+          {deleteDocumentError && (
+            <p role="alert" className="px-6 pt-4 text-sm text-error">
+              {deleteDocumentError}
+            </p>
+          )}
+
           {corpora.length === 0 ? (
             <p className="p-6 text-on-surface-variant">
               No corpora yet. Create your first corpus to get started.
@@ -381,6 +284,8 @@ export function CorporaScreen({ onNavigate }: CorporaScreenProps) {
                       documents={documentsByCorpus.get(corpus.id) ?? []}
                       isExpanded={expandedCorpusIds.has(corpus.id)}
                       onToggleExpanded={() => toggleExpanded(corpus.id)}
+                      onDocumentOpen={onDocumentOpen}
+                      onDeleteDocument={setPendingDeleteDocument}
                     />
                   </li>
                 )
@@ -390,11 +295,13 @@ export function CorporaScreen({ onNavigate }: CorporaScreenProps) {
         </div>
       )}
 
-      {activeCorpus && (
-        <CorpusDocumentsPanel
-          corpusId={activeCorpus.id}
-          corpusName={activeCorpus.name}
-          onDocumentsChanged={refreshAllDocuments}
+      {pendingDeleteDocument && (
+        <ConfirmModal
+          title="Delete document"
+          message={`Delete "${pendingDeleteDocument.name}"? This removes it from the system entirely and cannot be undone.`}
+          confirmLabel="Delete"
+          onConfirm={() => void handleConfirmDeleteDocument(pendingDeleteDocument)}
+          onCancel={() => setPendingDeleteDocument(null)}
         />
       )}
     </AppShell>

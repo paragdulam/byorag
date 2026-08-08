@@ -58,12 +58,12 @@ test.describe('Corpora management', () => {
     await expect(sidebarActiveCorpus).toHaveText(new RegExp(corpusAlpha, 'i'))
   })
 
-  test('upload into one corpus, attach to another without re-uploading, then unlink from the first', async ({
+  test('a document uploaded into one corpus never appears in another (033-ui-ux-polish: one corpus per document)', async ({
     page,
   }) => {
     const suffix = Date.now()
-    const corpusA = `Attach Test A ${suffix}`
-    const corpusB = `Attach Test B ${suffix}`
+    const corpusA = `Scope Test A ${suffix}`
+    const corpusB = `Scope Test B ${suffix}`
     // Unique content per run (not one of the shared fixture files) so
     // content-hash dedup (FR-005) never collides with another spec's upload
     // under parallel execution.
@@ -80,7 +80,7 @@ test.describe('Corpora management', () => {
     // Self-contained: see the signup comment on the test above.
     await page.goto('/')
     await page.getByRole('button', { name: /sign up/i }).click()
-    await page.getByLabel('Email').fill(`corpora-attach-${suffix}@example.com`)
+    await page.getByLabel('Email').fill(`corpora-scope-${suffix}@example.com`)
     await page.getByLabel('Password').fill('hunter22')
     await page.getByRole('button', { name: /^sign up$/i }).click()
     await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible()
@@ -88,7 +88,8 @@ test.describe('Corpora management', () => {
     await createCorpus(page, corpusA)
     await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
 
-    // Upload a document while Corpus A is active (FR-005).
+    // Upload a document while Corpus A is active (FR-005) — it belongs to exactly this corpus
+    // for its whole lifetime now (033-ui-ux-polish: one-to-many corpus/document relationship).
     await page.setInputFiles('[data-testid="upload-browse-input"]', {
       name: fileName,
       mimeType: 'application/pdf',
@@ -99,34 +100,11 @@ test.describe('Corpora management', () => {
     await createCorpus(page, corpusB)
     await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
 
-    // Corpus B starts empty -- the document was never uploaded here.
+    // Corpus B never sees it -- there is no attach/unlink mechanism anymore.
     await expect(page.getByText(fileName)).toHaveCount(0)
 
-    // Switch back to Corpus A via the Corpora screen and attach the document to Corpus B
-    // without re-uploading (FR-006).
+    // Switching back to Corpus A still shows it.
     await switchToCorpus(page, corpusA)
-    await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
-    await expect(page.getByText(fileName)).toBeVisible()
-    await page
-      .getByRole('combobox', { name: new RegExp(`add ${fileName} to another corpus`, 'i') })
-      .selectOption({ label: corpusB })
-
-    // Switch to Corpus B: the document now appears there too, without a
-    // duplicate copy (SC-004).
-    await switchToCorpus(page, corpusB)
-    await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
-    await expect(page.getByText(fileName)).toBeVisible()
-
-    // Unlink from Corpus A: the document survives (still linked to B).
-    await switchToCorpus(page, corpusA)
-    await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
-    await expect(page.getByText(fileName)).toBeVisible()
-    await page
-      .getByRole('button', { name: new RegExp(`remove ${fileName} from this corpus`, 'i') })
-      .click()
-    await expect(page.getByText(fileName)).toHaveCount(0)
-
-    await switchToCorpus(page, corpusB)
     await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
     await expect(page.getByText(fileName)).toBeVisible()
   })

@@ -100,7 +100,7 @@ test.describe('Deep linking — Golden Dataset entry links', () => {
     await page.getByRole('checkbox').first().check()
     await page.getByRole('button', { name: /^save$/i }).click()
     await expect(page.getByText('What is the notice period?')).toBeVisible()
-    await expect(page.getByText('Approved').first()).toBeVisible()
+    await expect(page.getByTitle('Approved').first()).toBeVisible()
 
     // Copy link, then open it in a new tab in the same signed-in session.
     await page.getByRole('button', { name: /copy link to what is the notice period/i }).click()

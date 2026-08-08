@@ -1,15 +1,9 @@
 import { apiFetch, getStoredToken } from './apiClient'
-import type {
-  DeletionResult,
-  DocumentWithCorpora,
-  SourceDocument,
-  UploadRejection,
-} from '../types/sourceDocument'
+import type { DeletionResult, SourceDocument, UploadRejection } from '../types/sourceDocument'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 const SOURCES_ENDPOINT = `${API_BASE_URL}/api/sources`
 const DELETE_SOURCES_ENDPOINT = `${SOURCES_ENDPOINT}/delete`
-const ALL_SOURCES_ENDPOINT = `${SOURCES_ENDPOINT}/all`
 
 interface RawSourceDocument {
   id: string
@@ -19,16 +13,8 @@ interface RawSourceDocument {
   status: SourceDocument['status']
 }
 
-interface RawDocumentWithCorpora extends RawSourceDocument {
-  corpusIds: string[]
-}
-
 interface ListSourcesResponse {
   documents: RawSourceDocument[]
-}
-
-interface ListAllSourcesResponse {
-  documents: RawDocumentWithCorpora[]
 }
 
 interface UploadSourcesResponse {
@@ -83,18 +69,6 @@ export function sourceFileRequest(documentId: string): {
   }
 }
 
-export async function listAllSources(): Promise<DocumentWithCorpora[]> {
-  const response = await apiFetch(ALL_SOURCES_ENDPOINT)
-  if (!response.ok) {
-    throw new Error(`Failed to load all sources: ${response.status}`)
-  }
-  const body = (await response.json()) as ListAllSourcesResponse
-  return body.documents.map((raw) => ({
-    ...toSourceDocument(raw),
-    corpusIds: raw.corpusIds,
-  }))
-}
-
 export interface UploadSourcesResult {
   documents: SourceDocument[]
   rejections: UploadRejection[]
@@ -118,30 +92,6 @@ export async function uploadSources(files: File[], corpusId: string): Promise<Up
   return {
     documents: body.documents.map(toSourceDocument),
     rejections: body.rejections,
-  }
-}
-
-export async function attachDocumentToCorpus(documentId: string, corpusId: string): Promise<void> {
-  const response = await apiFetch(`${SOURCES_ENDPOINT}/${encodeURIComponent(documentId)}/corpora`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ corpusId }),
-  })
-  if (!response.ok) {
-    throw new Error(`Failed to attach document to corpus: ${response.status}`)
-  }
-}
-
-export async function removeDocumentFromCorpus(
-  documentId: string,
-  corpusId: string,
-): Promise<void> {
-  const response = await apiFetch(
-    `${SOURCES_ENDPOINT}/${encodeURIComponent(documentId)}/corpora/${encodeURIComponent(corpusId)}`,
-    { method: 'DELETE' },
-  )
-  if (!response.ok) {
-    throw new Error(`Failed to remove document from corpus: ${response.status}`)
   }
 }
 

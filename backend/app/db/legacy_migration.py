@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.hashing import compute_content_hash
-from app.db.models import Corpus, Document, DocumentCorpus
+from app.db.models import Corpus, Document
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +48,13 @@ def migrate_legacy_pdfs(db: Session, pdfs_dir: Path) -> int:
         # (024-user-authentication research.md §3), same as `corpus.user_id` above.
         document = Document(
             name=path.name,
+            corpus_id=corpus.id,
             content_hash=content_hash,
             content=file_bytes,
             size_bytes=len(file_bytes),
             status="processed",
         )
         db.add(document)
-        db.flush()
-        db.add(DocumentCorpus(document_id=document.id, corpus_id=corpus.id))
         migrated += 1
 
     db.commit()

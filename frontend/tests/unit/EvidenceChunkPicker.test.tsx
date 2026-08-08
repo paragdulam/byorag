@@ -95,3 +95,36 @@ describe('EvidenceChunkPicker (026-golden-dataset US1)', () => {
     expect(onManualSearch).toHaveBeenCalledWith('termination clause')
   })
 })
+
+describe('EvidenceChunkPicker — cosine similarity (033-ui-ux-polish)', () => {
+  it("shows each candidate's cosine similarity on the same row as its CHUNK_N label", () => {
+    const scored: GoldenCandidate[] = [{ ...candidates[0], score: 0.842 }]
+    render(
+      <EvidenceChunkPicker
+        candidates={scored}
+        selectedChunkIds={new Set()}
+        onToggle={vi.fn()}
+        onManualSearch={vi.fn()}
+      />,
+    )
+
+    const chunkLabel = screen.getByText('CHUNK_0')
+    const score = screen.getByText('cosine similarity: 0.842')
+    // Same row: the label and score share an immediate parent (the row's own flex container).
+    expect(chunkLabel.parentElement?.parentElement).toBe(score.parentElement)
+  })
+
+  it('renders no similarity text for a candidate with no score (e.g. an already-saved chunk)', () => {
+    const unscored: GoldenCandidate[] = [candidates[0]]
+    render(
+      <EvidenceChunkPicker
+        candidates={unscored}
+        selectedChunkIds={new Set()}
+        onToggle={vi.fn()}
+        onManualSearch={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByText(/cosine similarity/i)).not.toBeInTheDocument()
+  })
+})

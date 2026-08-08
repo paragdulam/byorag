@@ -6,7 +6,11 @@ import type { ScreenId } from '../components/layout/SidebarNav'
  * per-screen entity deep links). Every field beyond `screen`/`corpusId` is meaningful only for
  * the screen(s) noted — always `null`/`false` elsewhere:
  * - `documentId`: Sources (selected document); Fixed Size Chunking (selected document, paired
- *   with `chunkIndex`)
+ *   with `chunkIndex`); also Embeddings, Vector View, Golden Dataset, and Playground's own
+ *   document-scope selector (035-document-scope-deep-links) — for those four, carried in a
+ *   `?documentId=` query param instead of the path, since their own path slot is already used
+ *   by a different entity (see `urlScheme.ts`'s `QUERY_DOCUMENT_SCREENS`). May be a real
+ *   document id or the `ENTIRE_CORPUS_SELECTION` sentinel.
  * - `chunkIndex`: Fixed Size Chunking only (positional index within `documentId`'s current
  *   chunk run — chunks there have no stable id, see research note in urlScheme.ts)
  * - `chunkId`: Vector View only (a saved chunk's stable id)

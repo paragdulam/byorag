@@ -2,7 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Chunk as ChunkRow
-from app.db.models import Document, DocumentCorpus
+from app.db.models import Document
 from app.db.models import Embedding as EmbeddingRow
 from app.retrieval.strategies.base import RETRIEVAL_STRATEGIES
 
@@ -59,8 +59,7 @@ class CosineSimilarityStrategy:
             select(EmbeddingRow.chunk_id, EmbeddingRow.id.label("embedding_id"), distance.label("distance"))
             .join(ChunkRow, ChunkRow.id == EmbeddingRow.chunk_id)
             .join(Document, Document.id == ChunkRow.document_id)
-            .join(DocumentCorpus, DocumentCorpus.document_id == Document.id)
-            .where(DocumentCorpus.corpus_id == corpus_id, EmbeddingRow.model == model)
+            .where(Document.corpus_id == corpus_id, EmbeddingRow.model == model)
             .distinct(EmbeddingRow.chunk_id)
             .order_by(EmbeddingRow.chunk_id, distance.asc())
             .subquery()

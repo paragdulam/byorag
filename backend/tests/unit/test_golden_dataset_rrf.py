@@ -73,3 +73,25 @@ def test_result_fields_carry_chunk_content_and_position() -> None:
     assert merged[0].documentId == "doc-42"
     assert merged[0].chunkIndex == 7
     assert merged[0].content == "Either party may terminate with 30 days notice."
+
+
+def test_score_is_the_raw_cosine_similarity_from_whichever_search_matched() -> None:
+    """033-ui-ux-polish: the RRF score itself is a fused rank score, not a cosine similarity —
+    `score` on the returned candidate is the underlying search's own raw similarity value."""
+    question_results = _results("a", "b")  # a=1.00, b=0.99
+    answer_results = _results("a", "c")  # a=1.00, c=0.99
+
+    merged = merge_candidates(question_results, answer_results)
+    by_id = {c.chunkId: c for c in merged}
+
+    assert by_id["b"].score == 0.99  # question-only match — question's own raw score
+    assert by_id["c"].score == 0.99  # answer-only match — answer's own raw score
+
+
+def test_score_prefers_the_question_search_raw_score_when_a_chunk_matches_both() -> None:
+    question_results = [(_FakeChunk("a"), "emb-a", 0.9)]
+    answer_results = [(_FakeChunk("a"), "emb-a", 0.7)]
+
+    merged = merge_candidates(question_results, answer_results)
+
+    assert merged[0].score == 0.9

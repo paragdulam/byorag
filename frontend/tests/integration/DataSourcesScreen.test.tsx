@@ -62,6 +62,79 @@ describe('DataSourcesScreen composition', () => {
   })
 })
 
+describe('DataSourcesScreen upload trigger (033-ui-ux-polish US2)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function stubUploadFetch(overrides: { onUpload?: () => void } = {}) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        const href = url.toString()
+        if (href.includes('/api/corpora')) {
+          return jsonResponse({
+            corpora: [{ id: 'default-corpus', name: 'Uncategorized', createdAt: '2026-07-14T00:00:00Z' }],
+          })
+        }
+        if (href.includes('/api/system/capacity')) {
+          return jsonResponse({
+            hardware: {
+              processorName: 'Test Processor',
+              cpuCores: 8,
+              totalMemoryGb: 16.0,
+              gpuDetected: false,
+              gpuName: null,
+              detectionFailed: false,
+            },
+            estimate: null,
+          })
+        }
+        if (init?.method === 'POST' && href.endsWith('/api/sources')) {
+          overrides.onUpload?.()
+          return jsonResponse({
+            documents: [
+              {
+                id: 'uploaded.pdf',
+                name: 'uploaded.pdf',
+                sizeBytes: 512,
+                uploadedAt: '2026-07-14T02:00:00Z',
+                status: 'processed',
+              },
+            ],
+            rejections: [],
+          })
+        }
+        return jsonResponse({ documents: [], rejections: [] })
+      }),
+    )
+  }
+
+  it('renders an "Upload" button beside the "Data Sources" heading, with no "Upload PDF Documents" card', async () => {
+    stubUploadFetch()
+    render(<DataSourcesScreen onNavigate={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument())
+    expect(screen.queryByText('Upload PDF Documents')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('upload-dropzone')).not.toBeInTheDocument()
+  })
+
+  it('uploading via the Upload button adds the document to the list', async () => {
+    const onUpload = vi.fn()
+    stubUploadFetch({ onUpload })
+    render(<DataSourcesScreen onNavigate={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument())
+    const file = new File(['%PDF-1.4'], 'uploaded.pdf', { type: 'application/pdf' })
+    const input = screen.getByTestId('upload-browse-input') as HTMLInputElement
+
+    await userEvent.upload(input, file)
+
+    await waitFor(() => expect(onUpload).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByText('uploaded.pdf')).toBeInTheDocument())
+  })
+})
+
 describe('DataSourcesScreen deletion (004-delete-source-documents)', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -122,95 +195,6 @@ describe('DataSourcesScreen deletion (004-delete-source-documents)', () => {
     await waitFor(() => {
       expect(screen.queryByText('report.pdf')).not.toBeInTheDocument()
     })
-  })
-})
-
-describe('DataSourcesScreen document-corpus association (008-corpora-management US2)', () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  function stubFetch(overrides: {
-    onAttach?: () => void
-    onRemove?: () => void
-  } = {}) {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string | URL, init?: RequestInit) => {
-        const href = url.toString()
-        if (href.includes('/api/corpora')) {
-          return jsonResponse({
-            corpora: [
-              { id: 'corpus-a', name: 'Corpus A', createdAt: '2026-07-14T00:00:00Z' },
-              { id: 'corpus-b', name: 'Corpus B', createdAt: '2026-07-14T00:05:00Z' },
-            ],
-          })
-        }
-        if (href.includes('/api/system/capacity')) {
-          return jsonResponse({
-            hardware: {
-              processorName: 'Test Processor',
-              cpuCores: 8,
-              totalMemoryGb: 16.0,
-              gpuDetected: false,
-              gpuName: null,
-              detectionFailed: false,
-            },
-            estimate: null,
-          })
-        }
-        if (init?.method === 'POST' && href.endsWith('/corpora')) {
-          overrides.onAttach?.()
-          return jsonResponse(null, 204)
-        }
-        if (init?.method === 'DELETE' && href.includes('/corpora/')) {
-          overrides.onRemove?.()
-          return jsonResponse(null, 204)
-        }
-        return jsonResponse({
-          documents: [
-            {
-              id: 'doc-1',
-              name: 'report.pdf',
-              sizeBytes: 1024,
-              uploadedAt: '2026-07-13T10:00:00Z',
-              status: 'processed',
-            },
-          ],
-          rejections: [],
-        })
-      }),
-    )
-  }
-
-  it('attaches a document to another corpus via the row control', async () => {
-    const onAttach = vi.fn()
-    stubFetch({ onAttach })
-
-    render(<DataSourcesScreen onNavigate={vi.fn()} />)
-    expect(await screen.findByText('report.pdf')).toBeInTheDocument()
-
-    await userEvent.selectOptions(
-      screen.getByRole('combobox', { name: /add report\.pdf to another corpus/i }),
-      'corpus-b',
-    )
-
-    await waitFor(() => expect(onAttach).toHaveBeenCalled())
-  })
-
-  it('removes a document from the active corpus via the row control', async () => {
-    const onRemove = vi.fn()
-    stubFetch({ onRemove })
-
-    render(<DataSourcesScreen onNavigate={vi.fn()} />)
-    expect(await screen.findByText('report.pdf')).toBeInTheDocument()
-
-    await userEvent.click(
-      screen.getByRole('button', { name: /remove report\.pdf from this corpus/i }),
-    )
-
-    await waitFor(() => expect(onRemove).toHaveBeenCalled())
-    await waitFor(() => expect(screen.queryByText('report.pdf')).not.toBeInTheDocument())
   })
 })
 

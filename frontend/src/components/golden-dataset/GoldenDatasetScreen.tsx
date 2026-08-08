@@ -30,6 +30,11 @@ export interface GoldenDatasetScreenProps {
   /** Called whenever the "Write Manually" form opens or closes, so the caller can keep the URL
    * in sync. */
   onCreatingEntryChanged?: (isCreating: boolean) => void
+  /** A document/scope to select directly, per a deep link (035-document-scope-deep-links) — a
+   * real document id or the `ENTIRE_CORPUS_SELECTION` sentinel. */
+  linkedDocumentId?: string | null
+  /** Called whenever the "Scope" dropdown changes, so the caller can keep the URL in sync. */
+  onDocumentSelected?: (documentId: string) => void
 }
 
 export function GoldenDatasetScreen({
@@ -39,6 +44,8 @@ export function GoldenDatasetScreen({
   onEntryOpened,
   isCreatingEntry,
   onCreatingEntryChanged,
+  linkedDocumentId,
+  onDocumentSelected,
 }: GoldenDatasetScreenProps) {
   const { activeCorpusId } = useCorpus()
   const [documents, setDocuments] = useState<SourceDocument[]>([])
@@ -101,6 +108,21 @@ export function GoldenDatasetScreen({
     }
   }, [linkedEntryId, entries, activeDocumentId, isEntireCorpus])
 
+  // Deep link (035-document-scope-deep-links): selects the linked document/scope — runs after
+  // the linkedEntryId effect above so an explicit ?documentId= wins over the entry's own forced
+  // Entire Corpus fallback. Guarded on "not already selected" so it doesn't refire every time
+  // `selectDocument` echoes its own choice back in as the next `linkedDocumentId` (same
+  // self-triggering-loop fix as the linkedEntryId effect above).
+  useEffect(() => {
+    if (
+      linkedDocumentId != null &&
+      linkedDocumentId !== activeDocumentId &&
+      (isEntireCorpusSelection(linkedDocumentId) || documents.some((doc) => doc.id === linkedDocumentId))
+    ) {
+      setSelectedDocumentId(linkedDocumentId)
+    }
+  }, [linkedDocumentId, documents, activeDocumentId])
+
   // 030-golden-dataset-entry-detail US1: `entries` is always every entry in the corpus —
   // narrow it to the current scope-dropdown selection before rendering anything derived from
   // it, so the Pending Review section and the main list both stay consistent with the
@@ -123,6 +145,16 @@ export function GoldenDatasetScreen({
   function openManualCreation() {
     setIsCreatingManually(true)
     onCreatingEntryChanged?.(true)
+  }
+
+  function cancelManualCreation() {
+    setIsCreatingManually(false)
+    onCreatingEntryChanged?.(false)
+  }
+
+  function selectDocument(documentId: string) {
+    setSelectedDocumentId(documentId)
+    onDocumentSelected?.(documentId)
   }
 
   function handleEntryChanged(_entry: GoldenEntry) {
@@ -199,7 +231,7 @@ export function GoldenDatasetScreen({
                   <select
                     id="golden-dataset-document"
                     value={activeDocumentId}
-                    onChange={(event) => setSelectedDocumentId(event.target.value)}
+                    onChange={(event) => selectDocument(event.target.value)}
                     className="mt-1 rounded border border-outline-variant bg-surface p-2 text-on-surface"
                   >
                     <option value={ENTIRE_CORPUS_SELECTION}>Entire Corpus</option>
@@ -292,6 +324,7 @@ export function GoldenDatasetScreen({
                         documentId: isEntireCorpus ? null : activeDocumentId,
                       }}
                       onSaved={handleSaved}
+                      onCancel={cancelManualCreation}
                     />
                   </div>
                 )}

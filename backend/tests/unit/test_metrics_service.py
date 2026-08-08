@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth import service as auth_service
 from app.db.models import EMBEDDING_DIMENSIONS
 from app.db.models import Chunk as ChunkRow
-from app.db.models import ConversationTurn, Corpus, Document, DocumentCorpus
+from app.db.models import ConversationTurn, Corpus, Document
 from app.db.models import Embedding as EmbeddingRow
 from app.db.models import TurnQualityScore
 from app.metrics import service
@@ -26,17 +26,19 @@ def _make_corpus_with_chunked_document(
     chunk_count: int = 3,
 ) -> tuple[Corpus, Document]:
     corpus = Corpus(user_id=user_id, name=f"corpus-{uuid.uuid4()}")
+    db_session.add(corpus)
+    db_session.flush()
     document = Document(
         user_id=user_id,
+        corpus_id=corpus.id,
         name="doc.pdf",
         content_hash=f"hash-{uuid.uuid4()}",
         content=b"x",
         size_bytes=10,
         status="processed",
     )
-    db_session.add_all([corpus, document])
+    db_session.add(document)
     db_session.flush()
-    db_session.add(DocumentCorpus(document_id=document.id, corpus_id=corpus.id))
 
     for i in range(chunk_count):
         chunk = ChunkRow(

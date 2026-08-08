@@ -28,6 +28,7 @@ export function GoldenReviewQueue({ entries, onEntryChanged }: GoldenReviewQueue
           scope={{ corpusId: openEntry.corpusId, documentId: openEntry.documentId }}
           initialEntry={openEntry}
           onSaved={handleSaved}
+          onCancel={() => setOpenEntry(null)}
         />
       </div>
     )

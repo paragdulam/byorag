@@ -86,72 +86,51 @@ test.describe('Corpora screen', () => {
     await expect(page.getByText(fileB.name)).toHaveCount(0)
   })
 
-  test('manage a corpus\'s documents from the Corpora screen (US3)', async ({ page }) => {
+  test('manage a corpus\'s documents from the Corpora screen (033-ui-ux-polish US1)', async ({ page }) => {
     const suffix = Date.now()
-    const corpusA = `Docs A ${suffix}`
-    const corpusB = `Docs B ${suffix}`
-    const fileName = `shared-${suffix}.pdf`
+    const corpusName = `Docs Manage ${suffix}`
+    const fileName = `managed-${suffix}.pdf`
 
     await page.goto('/')
     const main = page.locator('main')
-    // The corpus documents panel's own list -- scoped separately from the
-    // "add existing document" <select>'s <option> elements, which also match
-    // the file name text regardless of the dropdown's open/closed state.
-    const docsList = main.getByTestId('corpus-documents-list')
 
-    // Create Corpus A (active) and upload a document into it via Sources.
+    // Create the corpus (active) and upload a document into it via Sources.
     await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
     await main.getByRole('button', { name: /new corpus/i }).click()
-    await main.getByLabel(/new corpus name/i).fill(corpusA)
+    await main.getByLabel(/new corpus name/i).fill(corpusName)
     await main.getByRole('button', { name: /^create$/i }).click()
-    await expect(main.getByTestId(/corpus-row-/).filter({ hasText: corpusA })).toHaveAttribute(
-      'aria-current',
-      'page',
-    )
+    const row = main.getByTestId(/corpus-row-/).filter({ hasText: corpusName })
+    await expect(row).toHaveAttribute('aria-current', 'page')
+    // The row's own document preview -- there is no separate "Documents in X" panel
+    // (033-ui-ux-polish: hyperlink + delete styling lives directly under the corpus row).
+    const docsList = row.getByTestId(/-documents$/)
 
     await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
     await page.setInputFiles('[data-testid="upload-browse-input"]', {
       name: fileName,
       mimeType: 'application/pdf',
-      buffer: Buffer.from(`%PDF-1.4 shared ${suffix}`),
+      buffer: Buffer.from(`%PDF-1.4 managed ${suffix}`),
     })
     await expect(page.getByText(fileName)).toBeVisible()
 
-    // Create Corpus B and, from the Corpora screen, attach the existing
-    // document to it without re-uploading (FR-006).
+    // The document's name is a hyperlink back to the Sources screen with it opened
+    // (033-ui-ux-polish US1's document deep link).
     await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
-    await main.getByRole('button', { name: /new corpus/i }).click()
-    await main.getByLabel(/new corpus name/i).fill(corpusB)
-    await main.getByRole('button', { name: /^create$/i }).click()
-    await expect(main.getByTestId(/corpus-row-/).filter({ hasText: corpusB })).toHaveAttribute(
-      'aria-current',
-      'page',
-    )
+    await docsList.getByRole('link', { name: fileName }).click()
+    await expect(page).toHaveURL(/\/sources\/[^/]+\/[^/]+$/)
+    await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible()
+
+    // Deleting it from the Corpora screen (via the delete icon + confirmation) removes it from
+    // the system entirely — a document now belongs to exactly one corpus for its whole
+    // lifetime, so there is no separate "remove from this corpus" vs. "delete" distinction.
+    await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
+    await main.getByRole('button', { name: new RegExp(`delete ${fileName}`, 'i') }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.getByRole('button', { name: 'Delete' }).click()
     await expect(docsList.getByText(fileName)).toHaveCount(0)
 
-    await main.getByLabel(new RegExp(`add existing document to ${corpusB}`, 'i')).selectOption({
-      label: fileName,
-    })
-    await expect(docsList.getByText(fileName)).toBeVisible()
-
-    // Switch to Corpus A on the screen (via its "Make Active" button — row clicks no longer
-    // switch the active corpus, 018-ui-polish-batch US5) and remove the document from it there.
-    await main
-      .getByTestId(/corpus-row-/)
-      .filter({ hasText: corpusA })
-      .getByRole('button', { name: new RegExp(`make ${corpusA} active`, 'i') })
-      .click()
-    await expect(docsList.getByText(fileName)).toBeVisible()
-    await main.getByRole('button', { name: new RegExp(`remove ${fileName} from this corpus`, 'i') }).click()
-    await expect(docsList.getByText(fileName)).toHaveCount(0)
-
-    // It survives in Corpus B.
-    await main
-      .getByTestId(/corpus-row-/)
-      .filter({ hasText: corpusB })
-      .getByRole('button', { name: new RegExp(`make ${corpusB} active`, 'i') })
-      .click()
-    await expect(docsList.getByText(fileName)).toBeVisible()
+    await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
+    await expect(page.getByText(fileName)).toHaveCount(0)
   })
 
   test('deleting a corpus from its row is blocked while non-empty, then succeeds once empty (US4, relocated in 011-move-corpus-row-actions)', async ({
@@ -163,7 +142,6 @@ test.describe('Corpora screen', () => {
 
     await page.goto('/')
     const main = page.locator('main')
-    const docsList = main.getByTestId('corpus-documents-list')
 
     await page.getByRole('link', { name: 'CORPORA', exact: true }).click()
     await main.getByRole('button', { name: /new corpus/i }).click()
@@ -172,6 +150,7 @@ test.describe('Corpora screen', () => {
     const row = main.getByTestId(/corpus-row-/).filter({ hasText: corpusName })
     await expect(row).toHaveAttribute('aria-current', 'page')
     const deleteButton = row.getByRole('button', { name: new RegExp(`delete ${corpusName}`, 'i') })
+    const docsList = row.getByTestId(/-documents$/)
 
     await page.getByRole('link', { name: 'SOURCES', exact: true }).click()
     await page.setInputFiles('[data-testid="upload-browse-input"]', {
@@ -188,10 +167,9 @@ test.describe('Corpora screen', () => {
     await expect(main.getByRole('alert')).toContainText(/still associated/i)
     await expect(row).toBeVisible()
 
-    // Remove the document, then deletion succeeds.
-    await main
-      .getByRole('button', { name: new RegExp(`remove ${fileName} from this corpus`, 'i') })
-      .click()
+    // Delete the document (via its delete icon + confirmation), then corpus deletion succeeds.
+    await main.getByRole('button', { name: new RegExp(`delete ${fileName}`, 'i') }).click()
+    await page.getByRole('button', { name: 'Delete' }).click()
     await expect(docsList.getByText(fileName)).toHaveCount(0)
 
     page.once('dialog', (dialog) => dialog.accept())

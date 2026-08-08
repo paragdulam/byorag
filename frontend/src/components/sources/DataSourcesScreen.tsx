@@ -1,18 +1,28 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { AppShell } from '../layout/AppShell'
 import type { ScreenId } from '../layout/SidebarNav'
 // SystemCapacityWidget is temporarily not rendered on this screen (kept in the codebase for
 // future re-introduction) — see project notes.
-import { UploadDropzone } from './UploadDropzone'
 import { DocumentList } from './DocumentList'
 import { SourceDocumentPreview } from './SourceDocumentPreview'
 import { useSourceDocuments } from '../../hooks/useSourceDocuments'
-import { MAX_UPLOAD_SIZE_BYTES, ACCEPTED_UPLOAD_TYPES } from '../../lib/uploadConstraints'
+import { ACCEPTED_UPLOAD_TYPES } from '../../lib/uploadConstraints'
 import { exportCsv } from '../../lib/exportCsv'
 import { useCorpus } from '../../context/CorpusContext'
+import type { UploadRejection } from '../../types/sourceDocument'
 
 function formatDeletionErrorMessage(result: { id: string; reason: string | null }): string {
   return `${result.id}: ${result.reason ?? 'Could not be deleted'}`
+}
+
+function formatRejectionMessage(rejection: UploadRejection): string {
+  const reasonText =
+    rejection.reason === 'invalid-type'
+      ? 'is not a PDF file'
+      : rejection.reason === 'too-large'
+        ? 'exceeds the 50MB limit'
+        : 'could not be saved (a server error occurred)'
+  return `${rejection.fileName} ${reasonText}`
 }
 
 export interface DataSourcesScreenProps {
@@ -29,7 +39,7 @@ export function DataSourcesScreen({
   linkedDocumentId,
   onDocumentSelected,
 }: DataSourcesScreenProps) {
-  const { activeCorpusId, corpora, isLoading: isCorporaLoading } = useCorpus()
+  const { activeCorpusId, isLoading: isCorporaLoading } = useCorpus()
   const {
     documents,
     rejections,
@@ -37,12 +47,18 @@ export function DataSourcesScreen({
     isLoading,
     addFiles,
     deleteDocuments,
-    attachToCorpus,
-    removeFromCorpus,
   } = useSourceDocuments(activeCorpusId)
-  const otherCorpora = corpora.filter((corpus) => corpus.id !== activeCorpusId)
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const uploadInputRef = useRef<HTMLInputElement>(null)
+
+  function handleUploadInputChange(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? [])
+    if (files.length > 0) {
+      addFiles(files)
+    }
+    event.target.value = ''
+  }
 
   // Deep link (034-more-deep-links): opens straight to the linked document once it's loaded.
   useEffect(() => {
@@ -76,16 +92,37 @@ export function DataSourcesScreen({
   return (
     <AppShell activeScreen="sources" onNavigate={onNavigate}>
       <div className="flex h-full min-h-0 flex-col">
-        <div className="shrink-0">
-          <h1 className="text-4xl font-bold tracking-tight text-on-surface">Data Sources</h1>
-          <p className="mt-2 text-on-surface-variant">Manage ingestion pipelines.</p>
+        <div className="shrink-0 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-4xl font-bold tracking-tight text-on-surface">Data Sources</h1>
+            <p className="mt-2 text-on-surface-variant">Manage ingestion pipelines.</p>
+          </div>
+          <div>
+            <input
+              ref={uploadInputRef}
+              data-testid="upload-browse-input"
+              type="file"
+              multiple
+              accept={ACCEPTED_UPLOAD_TYPES.join(',')}
+              className="hidden"
+              onChange={handleUploadInputChange}
+            />
+            <button
+              type="button"
+              onClick={() => uploadInputRef.current?.click()}
+              disabled={activeCorpusId === null}
+              className="rounded bg-primary-container px-4 py-2 text-sm font-medium text-on-primary-container disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Upload
+            </button>
+          </div>
         </div>
 
         <div className="mt-6 flex min-h-0 min-w-0 flex-1 gap-6">
           {!isFullscreen && (
             <div
               data-testid="sources-left-pane"
-              className="flex min-h-0 min-w-0 w-1/2 flex-col overflow-y-auto pr-2"
+              className="flex min-h-0 min-w-0 w-1/2 flex-col gap-3 overflow-y-auto pr-2"
             >
               {isCorporaLoading ? (
                 <p className="text-on-surface-variant" role="status">
@@ -96,17 +133,24 @@ export function DataSourcesScreen({
                   Create a corpus (see the Corpora section in the left nav) before uploading
                   documents.
                 </p>
-              ) : (
-                <UploadDropzone
-                  onFilesSelected={addFiles}
-                  maxSizeBytes={MAX_UPLOAD_SIZE_BYTES}
-                  acceptedTypes={ACCEPTED_UPLOAD_TYPES}
-                  rejections={rejections}
-                />
+              ) : null}
+
+              {rejections.length > 0 && (
+                <ul className="flex flex-col gap-1" aria-label="Upload errors">
+                  {rejections.map((rejection, index) => (
+                    <li
+                      key={`${rejection.fileName}-${index}`}
+                      role="alert"
+                      className="rounded border border-error/40 bg-error-container/10 px-4 py-2 text-sm text-error"
+                    >
+                      {formatRejectionMessage(rejection)}
+                    </li>
+                  ))}
+                </ul>
               )}
 
               {isLoading ? (
-                <p className="mt-8 text-on-surface-variant" role="status">
+                <p className="text-on-surface-variant" role="status">
                   Loading documents…
                 </p>
               ) : (
@@ -114,16 +158,13 @@ export function DataSourcesScreen({
                   documents={documents}
                   onExportCsv={() => exportCsv(documents)}
                   onDeleteDocuments={deleteDocuments}
-                  otherCorpora={otherCorpora}
-                  onAttachToCorpus={attachToCorpus}
-                  onRemoveFromCorpus={removeFromCorpus}
                   selectedDocumentId={selectedDocumentId}
                   onSelectDocument={selectDocument}
                 />
               )}
 
               {deletionErrors.length > 0 && (
-                <ul className="mt-3 flex flex-col gap-1" aria-label="Deletion errors">
+                <ul className="flex flex-col gap-1" aria-label="Deletion errors">
                   {deletionErrors.map((result, index) => (
                     <li
                       key={`${result.id}-${index}`}

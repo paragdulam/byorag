@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.auth import service as auth_service
 from app.corpora import service as corpora_service
 from app.db.hashing import compute_content_hash
-from app.db.models import Document, DocumentCorpus
+from app.db.models import Document
 from app.sources import service
 
 
@@ -11,6 +11,7 @@ def _make_document(db_session: Session, user_id: str, name: str, content: bytes)
     corpus = corpora_service.create_corpus(db_session, user_id, f"corpus-for-{name}")
     document = Document(
         user_id=user_id,
+        corpus_id=corpus.id,
         name=name,
         content_hash=compute_content_hash(content),
         content=content,
@@ -18,8 +19,6 @@ def _make_document(db_session: Session, user_id: str, name: str, content: bytes)
         status="processed",
     )
     db_session.add(document)
-    db_session.flush()
-    db_session.add(DocumentCorpus(document_id=document.id, corpus_id=corpus.id))
     db_session.commit()
     return document
 

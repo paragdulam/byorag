@@ -106,4 +106,30 @@ describe('GoldenEntryEditor (026-golden-dataset US1)', () => {
       ],
     })
   })
+
+  it('renders no Cancel button when onCancel is omitted', () => {
+    render(
+      <GoldenEntryEditor scope={{ corpusId: 'corpus-1', documentId: 'doc-1' }} onSaved={vi.fn()} />,
+    )
+
+    expect(screen.queryByRole('button', { name: /^cancel$/i })).not.toBeInTheDocument()
+  })
+
+  it('calls onCancel, without saving, when Cancel is clicked (033-ui-ux-polish)', async () => {
+    const onCancel = vi.fn()
+    render(
+      <GoldenEntryEditor
+        scope={{ corpusId: 'corpus-1', documentId: 'doc-1' }}
+        onSaved={vi.fn()}
+        onCancel={onCancel}
+      />,
+    )
+    await userEvent.type(screen.getByLabelText(/question/i), 'What is the notice period?')
+    const createEntryCallsBefore = vi.mocked(goldenDatasetApi.createEntry).mock.calls.length
+
+    await userEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
+
+    expect(onCancel).toHaveBeenCalledOnce()
+    expect(goldenDatasetApi.createEntry).toHaveBeenCalledTimes(createEntryCallsBefore)
+  })
 })

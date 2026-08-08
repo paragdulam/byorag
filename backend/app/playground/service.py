@@ -11,7 +11,7 @@ from app.db.lookups import (
     get_document_owned_by,
 )
 from app.db.models import Chunk as ChunkRow
-from app.db.models import ConversationTurn, ConversationTurnChunk, Document, DocumentCorpus
+from app.db.models import ConversationTurn, ConversationTurnChunk, Document
 from app.db.models import Embedding as EmbeddingRow
 from app.embeddings.models.base import EMBEDDING_MODELS
 from app.generation.providers.base import GENERATION_PROVIDERS, GenerationError
@@ -107,16 +107,14 @@ def get_context(
     chunking_strategy = db.execute(
         select(ChunkRow.strategy)
         .join(Document, Document.id == ChunkRow.document_id)
-        .join(DocumentCorpus, DocumentCorpus.document_id == Document.id)
-        .where(DocumentCorpus.corpus_id == corpus_id)
+        .where(Document.corpus_id == corpus_id)
         .limit(1)
     ).scalar_one_or_none()
     embedding_model = db.execute(
         select(EmbeddingRow.model)
         .join(ChunkRow, ChunkRow.id == EmbeddingRow.chunk_id)
         .join(Document, Document.id == ChunkRow.document_id)
-        .join(DocumentCorpus, DocumentCorpus.document_id == Document.id)
-        .where(DocumentCorpus.corpus_id == corpus_id)
+        .where(Document.corpus_id == corpus_id)
         .order_by(EmbeddingRow.created_at.desc())
         .limit(1)
     ).scalar_one_or_none()
@@ -224,8 +222,7 @@ def create_turn(
             select(EmbeddingRow.id)
             .join(ChunkRow, ChunkRow.id == EmbeddingRow.chunk_id)
             .join(Document, Document.id == ChunkRow.document_id)
-            .join(DocumentCorpus, DocumentCorpus.document_id == Document.id)
-            .where(DocumentCorpus.corpus_id == corpus_id, EmbeddingRow.model == model)
+            .where(Document.corpus_id == corpus_id, EmbeddingRow.model == model)
             .limit(1)
         ).first()
         if has_saved_embedding is None:
@@ -272,11 +269,20 @@ def create_turn(
 def _build_prompt(question: str, chunks: list[ConversationTurnChunk]) -> str:
     """Assembled once, server-side, and persisted verbatim as `Turn.prompt` (017 research.md
     Decision 5) — the same deterministic template regardless of which provider is
-    configured, so answers stay comparable across models."""
-    context = "\n\n".join(f"[CHUNK {chunk.chunk_index}]\n{chunk.content}" for chunk in chunks)
+    configured, so answers stay comparable across models. Chunks are numbered by their
+    1-based position in `chunks` (not `chunk.chunk_index`, the chunk's position within its own
+    source document) so a `[N]` citation the model emits lines up with `turn.chunks[N - 1]` on
+    the frontend (033-ui-ux-polish, contracts/citation-marker-syntax.md)."""
+    context = "\n\n".join(
+        f"[CHUNK {position}]\n{chunk.content}" for position, chunk in enumerate(chunks, start=1)
+    )
     return (
         "Answer the question using only the context below. If the context does not contain "
         "the answer, say so explicitly rather than guessing. Use Markdown formatting.\n\n"
+        "After any claim that draws on a specific chunk, add a citation marker immediately "
+        "after the claim, in the form [N] where N is that chunk's number above (for example: "
+        '"The notice period is thirty days [1]."). Only cite chunk numbers that appear above — '
+        "never invent a number beyond the chunks given.\n\n"
         f"{context}\n\nQuestion: {question}"
     )
 

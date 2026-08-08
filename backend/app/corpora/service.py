@@ -2,7 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.lookups import get_corpus_owned_by
-from app.db.models import Corpus, DocumentCorpus
+from app.db.models import Corpus, Document
 
 
 class EmptyCorpusNameError(Exception):
@@ -93,7 +93,7 @@ def delete_corpus(db: Session, user_id: str, corpus_id: str) -> None:
 
     linked = list(
         db.execute(
-            select(DocumentCorpus).where(DocumentCorpus.corpus_id == corpus_id)
+            select(Document).where(Document.corpus_id == corpus_id)
         ).scalars()
     )
     if linked:

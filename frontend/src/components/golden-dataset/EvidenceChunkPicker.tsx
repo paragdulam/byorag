@@ -79,11 +79,18 @@ export function EvidenceChunkPicker({
                 className="mt-1"
               />
               <span className="flex-1">
-                <span className="mb-1 flex items-center gap-2">
-                  <span className="font-mono text-xs text-tertiary">
-                    CHUNK_{candidate.chunkIndex}
+                <span className="mb-1 flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-tertiary">
+                      CHUNK_{candidate.chunkIndex}
+                    </span>
+                    <MatchBadge candidate={candidate} />
                   </span>
-                  <MatchBadge candidate={candidate} />
+                  {candidate.score !== undefined && (
+                    <span className="font-mono text-xs text-on-surface-variant">
+                      cosine similarity: {candidate.score.toFixed(3)}
+                    </span>
+                  )}
                 </span>
                 <span className="block text-sm text-on-surface">{candidate.content}</span>
               </span>

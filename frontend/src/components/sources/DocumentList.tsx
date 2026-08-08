@@ -2,18 +2,10 @@ import { useState } from 'react'
 import type { SourceDocument } from '../../types/sourceDocument'
 import { formatFileSize } from '../../lib/formatFileSize'
 
-export interface OtherCorpus {
-  id: string
-  name: string
-}
-
 export interface DocumentListProps {
   documents: SourceDocument[]
   onExportCsv: () => void
   onDeleteDocuments: (ids: string[]) => void
-  otherCorpora?: OtherCorpus[]
-  onAttachToCorpus?: (documentId: string, targetCorpusId: string) => void
-  onRemoveFromCorpus?: (documentId: string) => void
   selectedDocumentId?: string | null
   onSelectDocument?: (documentId: string) => void
 }
@@ -55,9 +47,6 @@ export function DocumentList({
   documents,
   onExportCsv,
   onDeleteDocuments,
-  otherCorpora = [],
-  onAttachToCorpus,
-  onRemoveFromCorpus,
   selectedDocumentId = null,
   onSelectDocument,
 }: DocumentListProps) {
@@ -87,7 +76,7 @@ export function DocumentList({
   }
 
   return (
-    <div className="mt-8 rounded-lg border border-outline-variant bg-surface-container">
+    <div className="rounded-lg border border-outline-variant bg-surface-container">
       <div className="flex items-center justify-between border-b border-outline-variant p-6">
         <h2 className="text-xl font-semibold text-on-surface">Document List</h2>
         <div className="flex gap-2">
@@ -119,9 +108,7 @@ export function DocumentList({
           pane instead of overflowing the surrounding split-pane layout (022-chunk-preview-ui-fixes
           US1). The other columns get fixed widths sized to their content (STATUS needs w-32 to fit
           the "PROCESSED" chip without spilling into the actions column) and DOCUMENT NAME takes
-          whatever space is left via w-auto — the actions column only needs to fit a single Delete
-          button today; re-enabling the commented-out attach/remove controls below will need
-          revisiting this width. */}
+          whatever space is left via w-auto. */}
       <div className="overflow-x-auto">
         <table className="w-full table-fixed text-left">
           <thead>
@@ -179,39 +166,6 @@ export function DocumentList({
                 <td className="px-6 py-4 text-right">
                   {doc.status === 'processed' && (
                     <div className="flex items-center justify-end gap-2">
-                      {/* {onAttachToCorpus && otherCorpora.length > 0 && (
-                        <select
-                          aria-label={`Add ${doc.name} to another corpus`}
-                          defaultValue=""
-                          onChange={(event) => {
-                            const targetCorpusId = event.target.value
-                            if (targetCorpusId) {
-                              onAttachToCorpus(doc.id, targetCorpusId)
-                              event.target.value = ''
-                            }
-                          }}
-                          className="rounded border border-outline-variant bg-surface px-2 py-1 text-xs text-on-surface"
-                        >
-                          <option value="" disabled>
-                            Add to corpus…
-                          </option>
-                          {otherCorpora.map((corpus) => (
-                            <option key={corpus.id} value={corpus.id}>
-                              {corpus.name}
-                            </option>
-                          ))}
-                        </select>
-                      )} */}
-                      {/* {onRemoveFromCorpus && (
-                        <button
-                          type="button"
-                          aria-label={`Remove ${doc.name} from this corpus`}
-                          onClick={() => onRemoveFromCorpus(doc.id)}
-                          className="rounded border border-outline-variant px-3 py-1 text-sm text-on-surface hover:bg-surface-container-high"
-                        >
-                          Remove from Corpus
-                        </button>
-                      )} */}
                       <button
                         type="button"
                         aria-label={`Delete ${doc.name}`}

@@ -110,29 +110,35 @@ class Corpus(Base):
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
 
-    document_links: Mapped[list["DocumentCorpus"]] = relationship(
-        back_populates="corpus", cascade="all, delete-orphan"
-    )
-
 
 class Document(Base):
     __tablename__ = "documents"
     __table_args__ = (
-        UniqueConstraint("user_id", "content_hash", name="uq_document_user_content_hash"),
+        UniqueConstraint(
+            "user_id", "corpus_id", "content_hash", name="uq_document_user_corpus_content_hash"
+        ),
     )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     # Denormalized owner, set once at upload time — kept alongside the corpus's own
-    # user_id so per-user queries never need to join through document_corpora/corpora to
-    # find the owner (024-user-authentication research.md §7). Nullable for the same
-    # pre-existing-row reason as Corpus.user_id.
+    # user_id so per-user queries never need to join through corpora to find the owner
+    # (024-user-authentication research.md §7). Nullable for the same pre-existing-row
+    # reason as Corpus.user_id.
     user_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
     )
+    # A document belongs to exactly one corpus, set at upload time and never reassigned
+    # (033-ui-ux-polish data-model.md — replaces the old `document_corpora` many-to-many
+    # join table). Plain column, no DB-level FK — same reasoning as `user_id` above; "a
+    # corpus can't be deleted while it has documents" is enforced at the service layer
+    # (`corpora/service.py`), not via `ON DELETE RESTRICT`. Nullable only to tolerate rows
+    # from before this migration that had no resolvable corpus association at all.
+    corpus_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    # Content-based dedup (FR-005) is scoped per user, not global — two different users
-    # uploading identical bytes each get their own private Document row (corpora/documents
-    # are strictly private, 024-user-authentication spec.md Clarifications).
+    # Content-based dedup (FR-005) is scoped per user *and* per corpus, not just per user —
+    # the same PDF can exist in two different corpora as two independent rows, since a
+    # document is no longer a shared reference across corpora (033-ui-ux-polish
+    # Clarifications).
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -141,35 +147,12 @@ class Document(Base):
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
 
-    corpus_links: Mapped[list["DocumentCorpus"]] = relationship(
-        back_populates="document", cascade="all, delete-orphan"
-    )
     chunks: Mapped[list["Chunk"]] = relationship(
         back_populates="document", cascade="all, delete-orphan"
     )
     conversation_turns: Mapped[list["ConversationTurn"]] = relationship(
         back_populates="document", cascade="all, delete-orphan"
     )
-
-
-class DocumentCorpus(Base):
-    __tablename__ = "document_corpora"
-
-    document_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True
-    )
-    corpus_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
-        ForeignKey("corpora.id", ondelete="RESTRICT"),
-        primary_key=True,
-        index=True,
-    )
-    added_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
-
-    document: Mapped["Document"] = relationship(back_populates="corpus_links")
-    corpus: Mapped["Corpus"] = relationship(back_populates="document_links")
 
 
 class Chunk(Base):

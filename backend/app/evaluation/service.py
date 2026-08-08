@@ -133,14 +133,12 @@ def turn_ids_for_pipeline(
     """Every turn (document- or corpus-scoped) belonging to one `(corpus_id, chunking_strategy,
     embedding_model)` pipeline — the shared filter behind question/answer counts, the scope
     breakdown, and quality-score aggregation (data-model.md "Derived Concept: RAG Pipeline")."""
-    from app.db.models import Document, DocumentCorpus  # local import avoids a cycle at module load
+    from app.db.models import Document  # local import avoids a cycle at module load
 
     document_scoped = select(ConversationTurn.id).join(
         Document, Document.id == ConversationTurn.document_id
-    ).join(
-        DocumentCorpus, DocumentCorpus.document_id == Document.id
     ).where(
-        DocumentCorpus.corpus_id == corpus_id,
+        Document.corpus_id == corpus_id,
         ConversationTurn.chunking_strategy == chunking_strategy,
         ConversationTurn.embedding_model == embedding_model,
     )

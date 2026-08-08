@@ -162,8 +162,3 @@ def test_listing_endpoints_only_return_the_requesting_users_own_rows(
     second_names = {c["name"] for c in second.get("/api/corpora").json()["corpora"]}
     assert first_names == {"First's Corpus"}
     assert second_names == {"Second's Corpus"}
-
-    first_docs = first.get("/api/sources/all").json()["documents"]
-    second_docs = second.get("/api/sources/all").json()["documents"]
-    assert first_docs == []
-    assert second_docs == []

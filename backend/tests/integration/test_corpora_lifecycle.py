@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.db.models import Document, DocumentCorpus
+from app.db.models import Document
 
 
 def test_corpus_lifecycle_create_list_switch_scopes_sources(client: TestClient) -> None:
@@ -33,6 +33,7 @@ def test_delete_blocked_while_corpus_has_documents(client: TestClient, db_sessio
     corpus = client.post("/api/corpora", json={"name": "Has Docs"}).json()
 
     document = Document(
+        corpus_id=corpus["id"],
         name="a.pdf",
         content_hash="a" * 64,
         content=b"x",
@@ -40,8 +41,6 @@ def test_delete_blocked_while_corpus_has_documents(client: TestClient, db_sessio
         status="processed",
     )
     db_session.add(document)
-    db_session.flush()
-    db_session.add(DocumentCorpus(document_id=document.id, corpus_id=corpus["id"]))
     db_session.commit()
 
     response = client.delete(f"/api/corpora/{corpus['id']}")
@@ -55,6 +54,7 @@ def test_switching_active_corpus_scopes_sources(client: TestClient, db_session: 
     corpus_b = client.post("/api/corpora", json={"name": "Scoped B"}).json()
 
     document = Document(
+        corpus_id=corpus_a["id"],
         name="only-in-a.pdf",
         content_hash="b" * 64,
         content=b"x",
@@ -62,8 +62,6 @@ def test_switching_active_corpus_scopes_sources(client: TestClient, db_session: 
         status="processed",
     )
     db_session.add(document)
-    db_session.flush()
-    db_session.add(DocumentCorpus(document_id=document.id, corpus_id=corpus_a["id"]))
     db_session.commit()
 
     docs_a = client.get("/api/sources", params={"corpusId": corpus_a["id"]}).json()["documents"]

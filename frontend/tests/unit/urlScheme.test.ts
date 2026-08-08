@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest'
 import {
   buildChunkingChunkLink,
   buildDocumentLink,
+  buildEmbeddingsDocumentLink,
   buildEntryLink,
+  buildGoldenDatasetDocumentLink,
   buildNewEntryLink,
   buildPath,
+  buildPlaygroundDocumentLink,
   buildTurnLink,
   buildVectorChunkLink,
+  buildVectorViewDocumentLink,
   parseRoute,
 } from '../../src/router/urlScheme'
 import { baseRoute } from '../../src/router/types'
@@ -113,6 +117,57 @@ describe('urlScheme (032-deep-linking contracts/url-scheme.md, extended for per-
       expect(parseRoute('/playground/corpus-1/turn-9/extra')).toBeNull()
       expect(parseRoute('/fixed-size-chunking/corpus-1/doc-9/3/extra')).toBeNull()
     })
+
+    describe('?documentId= query param (035-document-scope-deep-links)', () => {
+      it('reads documentId from the query string for Embeddings, Vector View, Golden Dataset, and Playground', () => {
+        expect(parseRoute('/embeddings/corpus-1', '?documentId=doc-9')).toEqual({
+          ...baseRoute('embeddings', 'corpus-1'),
+          documentId: 'doc-9',
+        })
+        expect(parseRoute('/vector-view/corpus-1', '?documentId=doc-9')).toEqual({
+          ...baseRoute('vector-view', 'corpus-1'),
+          documentId: 'doc-9',
+        })
+        expect(parseRoute('/golden-dataset/corpus-1', '?documentId=doc-9')).toEqual({
+          ...baseRoute('golden-dataset', 'corpus-1'),
+          documentId: 'doc-9',
+        })
+        expect(parseRoute('/playground/corpus-1', '?documentId=doc-9')).toEqual({
+          ...baseRoute('playground', 'corpus-1'),
+          documentId: 'doc-9',
+        })
+      })
+
+      it('accepts the ENTIRE_CORPUS_SELECTION sentinel as a documentId value', () => {
+        expect(parseRoute('/playground/corpus-1', '?documentId=__entire-corpus__')).toEqual({
+          ...baseRoute('playground', 'corpus-1'),
+          documentId: '__entire-corpus__',
+        })
+      })
+
+      it('defaults documentId to null when the query string is absent or empty', () => {
+        expect(parseRoute('/embeddings/corpus-1')).toEqual(baseRoute('embeddings', 'corpus-1'))
+        expect(parseRoute('/embeddings/corpus-1', '')).toEqual(baseRoute('embeddings', 'corpus-1'))
+        expect(parseRoute('/embeddings/corpus-1', '?documentId=')).toEqual(
+          baseRoute('embeddings', 'corpus-1'),
+        )
+      })
+
+      it('is ignored for screens whose documentId already lives in the path', () => {
+        expect(parseRoute('/sources/corpus-1/doc-9', '?documentId=doc-other')).toEqual({
+          ...baseRoute('sources', 'corpus-1'),
+          documentId: 'doc-9',
+        })
+      })
+
+      it('coexists with the path-based entity (e.g. Golden Dataset entryId) on the same URL', () => {
+        expect(parseRoute('/golden-dataset/corpus-1/entry-9', '?documentId=doc-3')).toEqual({
+          ...baseRoute('golden-dataset', 'corpus-1'),
+          entryId: 'entry-9',
+          documentId: 'doc-3',
+        })
+      })
+    })
   })
 
   describe('buildPath', () => {
@@ -158,6 +213,27 @@ describe('urlScheme (032-deep-linking contracts/url-scheme.md, extended for per-
       )
     })
 
+    it('appends ?documentId= for Embeddings, Vector View, Golden Dataset, and Playground', () => {
+      expect(buildPath({ ...baseRoute('embeddings', 'corpus-1'), documentId: 'doc-9' })).toBe(
+        '/embeddings/corpus-1?documentId=doc-9',
+      )
+      expect(buildPath({ ...baseRoute('vector-view', 'corpus-1'), documentId: 'doc-9' })).toBe(
+        '/vector-view/corpus-1?documentId=doc-9',
+      )
+      expect(buildPath({ ...baseRoute('golden-dataset', 'corpus-1'), documentId: 'doc-9' })).toBe(
+        '/golden-dataset/corpus-1?documentId=doc-9',
+      )
+      expect(buildPath({ ...baseRoute('playground', 'corpus-1'), documentId: 'doc-9' })).toBe(
+        '/playground/corpus-1?documentId=doc-9',
+      )
+    })
+
+    it('does not append a documentId query string for Sources/Fixed Size Chunking (already in the path)', () => {
+      expect(buildPath({ ...baseRoute('sources', 'corpus-1'), documentId: 'doc-9' })).toBe(
+        '/sources/corpus-1/doc-9',
+      )
+    })
+
     it('round-trips every path through parseRoute', () => {
       const routes: ReturnType<typeof baseRoute>[] = [
         baseRoute('corpora', null),
@@ -166,13 +242,19 @@ describe('urlScheme (032-deep-linking contracts/url-scheme.md, extended for per-
         baseRoute('playground', null),
         { ...baseRoute('sources', 'corpus-1'), documentId: 'doc-9' },
         { ...baseRoute('fixed-size-chunking', 'corpus-1'), documentId: 'doc-9', chunkIndex: 3 },
+        { ...baseRoute('fixed-size-chunking', 'corpus-1'), documentId: 'doc-9' },
         { ...baseRoute('vector-view', 'corpus-1'), chunkId: 'chunk-9' },
         { ...baseRoute('golden-dataset', 'corpus-1'), entryId: 'entry-9' },
         { ...baseRoute('golden-dataset', 'corpus-1'), isCreatingEntry: true },
         { ...baseRoute('playground', 'corpus-1'), turnId: 'turn-9' },
+        { ...baseRoute('embeddings', 'corpus-1'), documentId: 'doc-9' },
+        { ...baseRoute('vector-view', 'corpus-1'), documentId: 'doc-9' },
+        { ...baseRoute('golden-dataset', 'corpus-1'), documentId: 'doc-9' },
+        { ...baseRoute('playground', 'corpus-1'), documentId: 'doc-9' },
       ]
       for (const route of routes) {
-        expect(parseRoute(buildPath(route))).toEqual(route)
+        const [pathname, search] = buildPath(route).split('?')
+        expect(parseRoute(pathname, search ? `?${search}` : '')).toEqual(route)
       }
     })
   })
@@ -202,6 +284,30 @@ describe('urlScheme (032-deep-linking contracts/url-scheme.md, extended for per-
 
     it('buildTurnLink', () => {
       expect(buildTurnLink('corpus-1', 'turn-9')).toBe('/playground/corpus-1/turn-9')
+    })
+
+    it('buildEmbeddingsDocumentLink', () => {
+      expect(buildEmbeddingsDocumentLink('corpus-1', 'doc-9')).toBe(
+        '/embeddings/corpus-1?documentId=doc-9',
+      )
+    })
+
+    it('buildVectorViewDocumentLink', () => {
+      expect(buildVectorViewDocumentLink('corpus-1', 'doc-9')).toBe(
+        '/vector-view/corpus-1?documentId=doc-9',
+      )
+    })
+
+    it('buildGoldenDatasetDocumentLink', () => {
+      expect(buildGoldenDatasetDocumentLink('corpus-1', 'doc-9')).toBe(
+        '/golden-dataset/corpus-1?documentId=doc-9',
+      )
+    })
+
+    it('buildPlaygroundDocumentLink', () => {
+      expect(buildPlaygroundDocumentLink('corpus-1', 'doc-9')).toBe(
+        '/playground/corpus-1?documentId=doc-9',
+      )
     })
   })
 })

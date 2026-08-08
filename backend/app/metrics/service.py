@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.lookups import get_corpus_owned_by
 from app.db.models import Chunk as ChunkRow
-from app.db.models import ConversationTurn, Corpus, Document, DocumentCorpus
+from app.db.models import ConversationTurn, Corpus, Document
 from app.db.models import Embedding as EmbeddingRow
 from app.evaluation.service import (
     aggregate_pipeline_scores,
@@ -47,8 +47,7 @@ def list_corpora_summary(db: Session, user_id: str) -> ListCorporaResponse:
             db.execute(
                 select(ChunkRow.strategy)
                 .join(Document, Document.id == ChunkRow.document_id)
-                .join(DocumentCorpus, DocumentCorpus.document_id == Document.id)
-                .where(DocumentCorpus.corpus_id == corpus.id)
+                .where(Document.corpus_id == corpus.id)
                 .distinct()
             ).scalars()
         )
@@ -78,8 +77,7 @@ def list_pipelines(db: Session, user_id: str, corpus_id: str) -> ListPipelinesRe
         select(ChunkRow.strategy, EmbeddingRow.model)
         .join(EmbeddingRow, EmbeddingRow.chunk_id == ChunkRow.id)
         .join(Document, Document.id == ChunkRow.document_id)
-        .join(DocumentCorpus, DocumentCorpus.document_id == Document.id)
-        .where(DocumentCorpus.corpus_id == corpus_id)
+        .where(Document.corpus_id == corpus_id)
         .distinct()
     ).all()
 
@@ -95,8 +93,7 @@ def _build_pipeline_summary(
     chunk_count = db.execute(
         select(func.count(ChunkRow.id))
         .join(Document, Document.id == ChunkRow.document_id)
-        .join(DocumentCorpus, DocumentCorpus.document_id == Document.id)
-        .where(DocumentCorpus.corpus_id == corpus_id, ChunkRow.strategy == chunking_strategy)
+        .where(Document.corpus_id == corpus_id, ChunkRow.strategy == chunking_strategy)
     ).scalar_one()
 
     turn_ids = turn_ids_for_pipeline(db, corpus_id, chunking_strategy, embedding_model)

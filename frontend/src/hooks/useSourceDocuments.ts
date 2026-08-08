@@ -2,13 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { DeletionResult, SourceDocument, UploadRejection } from '../types/sourceDocument'
 import { validateFile } from '../lib/fileValidation'
 import { MAX_UPLOAD_SIZE_BYTES, ACCEPTED_UPLOAD_TYPES } from '../lib/uploadConstraints'
-import {
-  attachDocumentToCorpus,
-  deleteSources,
-  listSources,
-  removeDocumentFromCorpus,
-  uploadSources,
-} from '../lib/sourcesApi'
+import { deleteSources, listSources, uploadSources } from '../lib/sourcesApi'
 
 export interface UseSourceDocuments {
   documents: SourceDocument[]
@@ -19,8 +13,6 @@ export interface UseSourceDocuments {
   clearRejections: () => void
   deleteDocuments: (ids: string[]) => void
   clearDeletionErrors: () => void
-  attachToCorpus: (documentId: string, targetCorpusId: string) => Promise<void>
-  removeFromCorpus: (documentId: string) => Promise<void>
 }
 
 export function useSourceDocuments(corpusId: string | null): UseSourceDocuments {
@@ -173,28 +165,11 @@ export function useSourceDocuments(corpusId: string | null): UseSourceDocuments 
     setDeletionErrors([])
   }, [])
 
-  const attachToCorpus = useCallback(async (documentId: string, targetCorpusId: string) => {
-    await attachDocumentToCorpus(documentId, targetCorpusId)
-  }, [])
-
-  const removeFromCorpus = useCallback(
-    async (documentId: string) => {
-      if (corpusId === null) {
-        return
-      }
-      await removeDocumentFromCorpus(documentId, corpusId)
-      setDocuments((prev) => prev.filter((doc) => doc.id !== documentId))
-    },
-    [corpusId],
-  )
-
   return {
     documents,
     rejections,
     deletionErrors,
     isLoading,
-    attachToCorpus,
-    removeFromCorpus,
     addFiles,
     clearRejections,
     deleteDocuments,

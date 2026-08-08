@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 from sqlalchemy.orm import Session
 
@@ -260,6 +262,24 @@ def test_list_turns_empty_conversation_returns_empty_list(db_session: Session, u
     result = service.list_turns(db_session, user_id, document.id)
 
     assert result.turns == []
+
+
+def test_build_prompt_instructs_citation_markers_numbered_by_retrieval_position() -> None:
+    """033-ui-ux-polish, contracts/citation-marker-syntax.md — `[N]` must be the chunk's
+    1-based position in the retrieved-chunks list (matching `turn.chunks[N-1]` on the
+    frontend), not the chunk's own `chunk_index` within its source document."""
+    chunks = [
+        SimpleNamespace(chunk_index=7, content="alpha content"),
+        SimpleNamespace(chunk_index=2, content="beta content"),
+    ]
+
+    prompt = service._build_prompt("a query", chunks)
+
+    assert "[CHUNK 1]\nalpha content" in prompt
+    assert "[CHUNK 2]\nbeta content" in prompt
+    assert "[CHUNK 7]" not in prompt
+    assert "[N]" in prompt
+    assert "citation" in prompt.lower()
 
 
 class _StubProvider:

@@ -38,8 +38,8 @@ function renderScreen() {
 }
 
 // Routes /api/corpora (list/create) and gives every /api/sources* request an
-// empty, well-formed response -- once any corpus is active, CorpusDocumentsPanel
-// mounts and fetches both, regardless of what a given test cares about.
+// empty, well-formed response -- the screen fetches every corpus's documents for its
+// row-level preview on mount, regardless of what a given test cares about.
 function stubCorporaFetch(
   corpora: Array<{ id: string; name: string; createdAt: string }> = [],
 ) {
@@ -138,7 +138,7 @@ describe('CorporaScreen (009-corpora-screen US1)', () => {
   })
 })
 
-describe('CorporaScreen document management (009-corpora-screen US3)', () => {
+describe('CorporaScreen document management (033-ui-ux-polish US1)', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
@@ -147,39 +147,14 @@ describe('CorporaScreen document management (009-corpora-screen US3)', () => {
     return vi.fn(async (url: string | URL, init?: RequestInit) => {
       const href = url.toString()
 
-      if (init?.method === 'POST' && href.includes('/corpora') && !href.endsWith('/api/corpora')) {
-        return jsonResponse(null, 204)
-      }
-      if (init?.method === 'DELETE') {
-        return jsonResponse(null, 204)
+      if (init?.method === 'POST' && href.endsWith('/api/sources/delete')) {
+        return jsonResponse({ results: [{ id: 'doc-in-a', status: 'deleted', reason: null }] })
       }
       if (href.endsWith('/api/corpora')) {
         return jsonResponse({
           corpora: [
             { id: 'corpus-a', name: 'Corpus A', createdAt: '2026-07-14T00:00:00Z' },
             { id: 'corpus-b', name: 'Corpus B', createdAt: '2026-07-14T00:05:00Z' },
-          ],
-        })
-      }
-      if (href.includes('/api/sources/all')) {
-        return jsonResponse({
-          documents: [
-            {
-              id: 'doc-in-a',
-              name: 'already-in-a.pdf',
-              sizeBytes: 10,
-              uploadedAt: '2026-07-14T01:00:00Z',
-              status: 'processed',
-              corpusIds: ['corpus-a'],
-            },
-            {
-              id: 'doc-in-b',
-              name: 'in-b-only.pdf',
-              sizeBytes: 20,
-              uploadedAt: '2026-07-14T01:05:00Z',
-              status: 'processed',
-              corpusIds: ['corpus-b'],
-            },
           ],
         })
       }
@@ -200,120 +175,131 @@ describe('CorporaScreen document management (009-corpora-screen US3)', () => {
     })
   }
 
-  it("lists the selected corpus's documents", async () => {
+  it("lists a corpus's documents under its own row, with no separate \"Documents in X\" panel", async () => {
     vi.stubGlobal('fetch', stubFetchWithDocuments())
     const main = renderScreen()
 
-    await waitFor(() => expect(main.getByTestId('corpus-row-corpus-a')).toBeInTheDocument())
-    await userEvent.click(main.getByTestId('corpus-row-corpus-a'))
-
     await waitFor(() =>
-      expect(within(main.getByTestId('corpus-documents-list')).getByText('already-in-a.pdf')).toBeInTheDocument(),
+      expect(
+        within(main.getByTestId('corpus-row-corpus-a-documents')).getByText('already-in-a.pdf'),
+      ).toBeInTheDocument(),
     )
+    expect(main.queryByText(/^documents in /i)).not.toBeInTheDocument()
   })
 
-  it('the "add existing document" picker excludes documents already in the selected corpus', async () => {
+  it('renders each document name as a link to its Sources deep link', async () => {
     vi.stubGlobal('fetch', stubFetchWithDocuments())
     const main = renderScreen()
 
-    await waitFor(() => expect(main.getByTestId('corpus-row-corpus-a')).toBeInTheDocument())
-    await userEvent.click(main.getByTestId('corpus-row-corpus-a'))
     await waitFor(() =>
-      expect(within(main.getByTestId('corpus-documents-list')).getByText('already-in-a.pdf')).toBeInTheDocument(),
+      expect(
+        within(main.getByTestId('corpus-row-corpus-a-documents')).queryByRole('link'),
+      ).toBeInTheDocument(),
     )
-
-    const picker = (await main.findByLabelText(/add existing document/i)) as HTMLSelectElement
-    expect(picker).toHaveTextContent('in-b-only.pdf')
-    expect(picker).not.toHaveTextContent('already-in-a.pdf')
+    const link = within(main.getByTestId('corpus-row-corpus-a-documents')).getByRole('link', {
+      name: 'already-in-a.pdf',
+    })
+    expect(link).toHaveAttribute('href', '/sources/corpus-a/doc-in-a')
   })
 
-  it('attaches an existing document to the selected corpus via the picker', async () => {
+  it('clicking a document name opens it on the Sources screen via onDocumentOpen', async () => {
+    vi.stubGlobal('fetch', stubFetchWithDocuments())
+    const onDocumentOpen = vi.fn()
+    render(
+      <CorpusProvider>
+        <CorporaScreen onNavigate={vi.fn()} onDocumentOpen={onDocumentOpen} />
+      </CorpusProvider>,
+    )
+    const main = within(screen.getByRole('main'))
+
+    await waitFor(() =>
+      expect(
+        within(main.getByTestId('corpus-row-corpus-a-documents')).queryByRole('link'),
+      ).toBeInTheDocument(),
+    )
+    const link = within(main.getByTestId('corpus-row-corpus-a-documents')).getByRole('link', {
+      name: 'already-in-a.pdf',
+    })
+
+    await userEvent.click(link)
+
+    expect(onDocumentOpen).toHaveBeenCalledWith('corpus-a', 'doc-in-a')
+  })
+
+  it('clicking the delete icon opens a confirmation modal without deleting', async () => {
     const fetchMock = stubFetchWithDocuments()
     vi.stubGlobal('fetch', fetchMock)
     const main = renderScreen()
 
-    await waitFor(() => expect(main.getByTestId('corpus-row-corpus-a')).toBeInTheDocument())
-    await userEvent.click(main.getByTestId('corpus-row-corpus-a'))
-    const picker = await main.findByLabelText(/add existing document/i)
-    await waitFor(() => expect(picker).toHaveTextContent('in-b-only.pdf'))
+    await waitFor(() =>
+      expect(
+        within(main.getByTestId('corpus-row-corpus-a-documents')).getByText('already-in-a.pdf'),
+      ).toBeInTheDocument(),
+    )
 
-    await userEvent.selectOptions(picker, 'doc-in-b')
+    await userEvent.click(main.getByRole('button', { name: /delete already-in-a\.pdf/i }))
 
-    await waitFor(() => {
-      const attachCall = fetchMock.mock.calls.find(
-        (call) =>
-          (call[1] as RequestInit | undefined)?.method === 'POST' &&
-          (call[0] as string).includes('doc-in-b/corpora'),
-      )
-      expect(attachCall).toBeDefined()
-    })
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some((call) => (call[0] as string).endsWith('/api/sources/delete'))).toBe(false)
   })
 
-  it('removes a document from the selected corpus', async () => {
-    let removed = false
-    const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
-      const href = url.toString()
-
-      if (init?.method === 'DELETE' && href.includes('doc-in-a/corpora/corpus-a')) {
-        removed = true
-        return jsonResponse(null, 204)
-      }
-      if (href.endsWith('/api/corpora')) {
-        return jsonResponse({
-          corpora: [{ id: 'corpus-a', name: 'Corpus A', createdAt: '2026-07-14T00:00:00Z' }],
-        })
-      }
-      if (href.includes('/api/sources/all')) {
-        return jsonResponse({
-          documents: removed
-            ? []
-            : [
-                {
-                  id: 'doc-in-a',
-                  name: 'already-in-a.pdf',
-                  sizeBytes: 10,
-                  uploadedAt: '2026-07-14T01:00:00Z',
-                  status: 'processed',
-                  corpusIds: ['corpus-a'],
-                },
-              ],
-        })
-      }
-      if (href.includes('corpusId=corpus-a')) {
-        return jsonResponse({
-          documents: removed
-            ? []
-            : [
-                {
-                  id: 'doc-in-a',
-                  name: 'already-in-a.pdf',
-                  sizeBytes: 10,
-                  uploadedAt: '2026-07-14T01:00:00Z',
-                  status: 'processed',
-                },
-              ],
-        })
-      }
-      return jsonResponse({ documents: [] })
-    })
+  it('confirming the modal deletes the document and removes it from the list', async () => {
+    const fetchMock = stubFetchWithDocuments()
     vi.stubGlobal('fetch', fetchMock)
     const main = renderScreen()
 
-    await waitFor(() => expect(main.getByTestId('corpus-row-corpus-a')).toBeInTheDocument())
-    await userEvent.click(main.getByTestId('corpus-row-corpus-a'))
     await waitFor(() =>
-      expect(within(main.getByTestId('corpus-documents-list')).getByText('already-in-a.pdf')).toBeInTheDocument(),
+      expect(
+        within(main.getByTestId('corpus-row-corpus-a-documents')).getByText('already-in-a.pdf'),
+      ).toBeInTheDocument(),
+    )
+    await userEvent.click(main.getByRole('button', { name: /delete already-in-a\.pdf/i }))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => {
+      const deleteCall = fetchMock.mock.calls.find(
+        (call) =>
+          (call[1] as RequestInit | undefined)?.method === 'POST' &&
+          (call[0] as string).endsWith('/api/sources/delete'),
+      )
+      expect(deleteCall).toBeDefined()
+    })
+  })
+
+  it('canceling the modal leaves the document untouched', async () => {
+    const fetchMock = stubFetchWithDocuments()
+    vi.stubGlobal('fetch', fetchMock)
+    const main = renderScreen()
+
+    await waitFor(() =>
+      expect(
+        within(main.getByTestId('corpus-row-corpus-a-documents')).getByText('already-in-a.pdf'),
+      ).toBeInTheDocument(),
+    )
+    await userEvent.click(main.getByRole('button', { name: /delete already-in-a\.pdf/i }))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(
+      within(main.getByTestId('corpus-row-corpus-a-documents')).getByText('already-in-a.pdf'),
+    ).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some((call) => (call[0] as string).endsWith('/api/sources/delete'))).toBe(false)
+  })
+
+  it('no "Remove" button or "attach an existing document" control exists anywhere on the screen', async () => {
+    vi.stubGlobal('fetch', stubFetchWithDocuments())
+    const main = renderScreen()
+
+    await waitFor(() =>
+      expect(
+        within(main.getByTestId('corpus-row-corpus-a-documents')).getByText('already-in-a.pdf'),
+      ).toBeInTheDocument(),
     )
 
-    await userEvent.click(main.getByRole('button', { name: /remove already-in-a\.pdf/i }))
-
-    await waitFor(() => expect(main.queryByTestId('corpus-documents-list')).not.toBeInTheDocument())
-    await waitFor(() =>
-      expect(main.getByTestId('corpus-row-corpus-a-documents')).toHaveTextContent(
-        /no documents in this corpus yet/i,
-      ),
-    )
-    expect(removed).toBe(true)
+    expect(main.queryByRole('button', { name: /^remove/i })).not.toBeInTheDocument()
+    expect(main.queryByLabelText(/add existing document/i)).not.toBeInTheDocument()
   })
 })
 
@@ -472,11 +458,10 @@ describe('CorporaScreen: per-row document preview (018-ui-polish-batch US7)', ()
       sizeBytes: 10,
       uploadedAt: '2026-07-14T01:00:00Z',
       status: 'processed',
-      corpusIds: [corpusId],
     }))
   }
 
-  function stubFetchWithAllDocuments(allDocuments: unknown[]) {
+  function stubFetchWithDocumentsForCorpusA(documents: unknown[]) {
     return vi.fn(async (url: string | URL, init?: RequestInit) => {
       const href = url.toString()
       if (init?.method === 'DELETE') {
@@ -490,27 +475,32 @@ describe('CorporaScreen: per-row document preview (018-ui-polish-batch US7)', ()
           ],
         })
       }
-      if (href.includes('/api/sources/all')) {
-        return jsonResponse({ documents: allDocuments })
+      if (href.includes('corpusId=a')) {
+        return jsonResponse({ documents })
       }
       return jsonResponse({ documents: [] })
     })
   }
 
   it('shows exactly 5 documents plus a "Show more" control for a corpus with more than 5', async () => {
-    vi.stubGlobal('fetch', stubFetchWithAllDocuments(docsFor('a', 7)))
+    vi.stubGlobal('fetch', stubFetchWithDocumentsForCorpusA(docsFor('a', 7)))
     const main = renderScreen()
 
-    const preview = await waitFor(() => main.getByTestId('corpus-row-a-documents'))
-    expect(within(preview).getAllByRole('listitem')).toHaveLength(5)
+    await waitFor(() =>
+      expect(within(main.getByTestId('corpus-row-a-documents')).queryAllByRole('listitem')).toHaveLength(5),
+    )
+    const preview = main.getByTestId('corpus-row-a-documents')
     expect(within(preview).getByRole('button', { name: /show more/i })).toBeInTheDocument()
   })
 
   it('reveals the rest when "Show more" is clicked, and becomes "Show less"', async () => {
-    vi.stubGlobal('fetch', stubFetchWithAllDocuments(docsFor('a', 7)))
+    vi.stubGlobal('fetch', stubFetchWithDocumentsForCorpusA(docsFor('a', 7)))
     const main = renderScreen()
 
-    const preview = await waitFor(() => main.getByTestId('corpus-row-a-documents'))
+    await waitFor(() =>
+      expect(within(main.getByTestId('corpus-row-a-documents')).queryAllByRole('listitem')).toHaveLength(5),
+    )
+    const preview = main.getByTestId('corpus-row-a-documents')
     await userEvent.click(within(preview).getByRole('button', { name: /show more/i }))
 
     expect(within(preview).getAllByRole('listitem')).toHaveLength(7)
@@ -518,16 +508,18 @@ describe('CorporaScreen: per-row document preview (018-ui-polish-batch US7)', ()
   })
 
   it('shows all documents with no "Show more" control for a corpus with 5 or fewer', async () => {
-    vi.stubGlobal('fetch', stubFetchWithAllDocuments(docsFor('a', 3)))
+    vi.stubGlobal('fetch', stubFetchWithDocumentsForCorpusA(docsFor('a', 3)))
     const main = renderScreen()
 
-    const preview = await waitFor(() => main.getByTestId('corpus-row-a-documents'))
-    expect(within(preview).getAllByRole('listitem')).toHaveLength(3)
+    await waitFor(() =>
+      expect(within(main.getByTestId('corpus-row-a-documents')).queryAllByRole('listitem')).toHaveLength(3),
+    )
+    const preview = main.getByTestId('corpus-row-a-documents')
     expect(within(preview).queryByRole('button', { name: /show more/i })).not.toBeInTheDocument()
   })
 
   it('shows an empty-state message for a corpus with zero documents', async () => {
-    vi.stubGlobal('fetch', stubFetchWithAllDocuments([]))
+    vi.stubGlobal('fetch', stubFetchWithDocumentsForCorpusA([]))
     const main = renderScreen()
 
     const preview = await waitFor(() => main.getByTestId('corpus-row-a-documents'))

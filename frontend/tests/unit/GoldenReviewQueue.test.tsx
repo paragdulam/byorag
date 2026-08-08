@@ -101,4 +101,17 @@ describe('GoldenReviewQueue (026-golden-dataset US2)', () => {
     expect(screen.getByRole('button', { name: /^approve$/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^reject$/i })).not.toBeInTheDocument()
   })
+
+  it('returns to the list without saving when Cancel is clicked (033-ui-ux-polish)', async () => {
+    render(<GoldenReviewQueue entries={[pendingSummary]} onEntryChanged={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: /review/i }))
+    await waitFor(() => expect(screen.getByLabelText(/question/i)).toHaveValue('What does the passage say?'))
+    const updateEntryCallsBefore = vi.mocked(goldenDatasetApi.updateEntry).mock.calls.length
+
+    await userEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
+
+    expect(screen.getByText('What does the passage say?')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/preferred answer/i)).not.toBeInTheDocument()
+    expect(goldenDatasetApi.updateEntry).toHaveBeenCalledTimes(updateEntryCallsBefore)
+  })
 })

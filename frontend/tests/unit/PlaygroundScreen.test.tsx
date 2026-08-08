@@ -7,6 +7,7 @@ import type { UsePlaygroundConversation } from '../../src/hooks/usePlaygroundCon
 import type { SourceDocument } from '../../src/types/sourceDocument'
 import type { Turn } from '../../src/types/playground'
 import { CorpusProvider } from '../../src/context/CorpusContext'
+import { ENTIRE_CORPUS_SELECTION } from '../../src/lib/entireCorpusSelection'
 
 // AppShell -> SidebarNav reads Anthropic-key status from AuthContext
 // (025-user-profile-anthropic-key) -- mocked here since this suite predates it and isn't
@@ -88,6 +89,16 @@ describe('PlaygroundScreen — standard navigation shell', () => {
 
     expect(screen.getByText('CHUNKING')).toBeInTheDocument()
     expect(screen.getByText('SOURCES')).toBeInTheDocument()
+  })
+})
+
+describe('PlaygroundScreen — typography parity with Corpora (033-ui-ux-polish US6)', () => {
+  it('uses the Corpora-reference heading scale for the page title', () => {
+    mockState()
+
+    render(<PlaygroundScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('heading', { name: 'Playground' }).className).toContain('text-4xl')
   })
 })
 
@@ -207,28 +218,22 @@ describe('PlaygroundScreen — ask a question and get an answer automatically (0
   })
 })
 
-describe('PlaygroundScreen — every turn shows its own retrieved chunks and query embedding inline (031-playground-metrics-redesign US1)', () => {
-  it('shows each retrieved chunk identified by chunk id only, with a per-chunk Show more control', () => {
-    const turn = makeTurn({
-      chunks: [
-        { chunkId: 'c1', documentId: 'report.pdf', index: 0, content: 'first chunk full content', score: 0.9 },
-        { chunkId: 'c2', documentId: 'report.pdf', index: 1, content: 'second chunk full content', score: 0.5 },
-      ],
-    })
-    mockState({ turns: [turn] })
-
-    render(<PlaygroundScreen onNavigate={vi.fn()} />)
-
-    expect(screen.getByText(/CHUNK_0/)).toBeInTheDocument()
-    expect(screen.getByText(/CHUNK_1/)).toBeInTheDocument()
-    expect(screen.queryByText('first chunk full content')).not.toBeInTheDocument()
-    expect(screen.queryByText('second chunk full content')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /show more for chunk 0/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /show more for chunk 1/i })).toBeInTheDocument()
-  })
-
-  it("reveals a chunk's full content only after its own Show more is clicked", async () => {
+describe('PlaygroundScreen — every turn shows its own retrieved chunks and query embedding behind Actions (033-ui-ux-polish US6)', () => {
+  async function openQueryEmbedding(question: RegExp) {
     const userEvent = (await import('@testing-library/user-event')).default
+    await userEvent.click(screen.getByRole('button', { name: new RegExp(`actions for `, 'i') }))
+    await userEvent.click(screen.getByRole('menuitem', { name: /query embedding/i }))
+    void question
+  }
+
+  async function openRetrievedChunks(question: RegExp) {
+    const userEvent = (await import('@testing-library/user-event')).default
+    await userEvent.click(screen.getByRole('button', { name: new RegExp(`actions for `, 'i') }))
+    await userEvent.click(screen.getByRole('menuitem', { name: /retrieved chunks/i }))
+    void question
+  }
+
+  it('shows each retrieved chunk with its cosine similarity once Retrieved Chunks is chosen', async () => {
     const turn = makeTurn({
       chunks: [
         { chunkId: 'c1', documentId: 'report.pdf', index: 0, content: 'first chunk full content', score: 0.9 },
@@ -236,19 +241,27 @@ describe('PlaygroundScreen — every turn shows its own retrieved chunks and que
       ],
     })
     mockState({ turns: [turn] })
-
     render(<PlaygroundScreen onNavigate={vi.fn()} />)
-    await userEvent.click(screen.getByRole('button', { name: /show more for chunk 0/i }))
 
-    expect(screen.getByText('first chunk full content')).toBeInTheDocument()
-    expect(screen.queryByText('second chunk full content')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('playground-retrieved-chunks')).not.toBeInTheDocument()
+
+    await openRetrievedChunks(/refund/i)
+
+    const chunkList = screen.getByTestId('playground-retrieved-chunks')
+    expect(within(chunkList).getByText(/CHUNK_0/)).toBeInTheDocument()
+    expect(within(chunkList).getByText(/CHUNK_1/)).toBeInTheDocument()
+    expect(within(chunkList).getByText('first chunk full content')).toBeInTheDocument()
+    expect(within(chunkList).getByText('second chunk full content')).toBeInTheDocument()
+    expect(within(chunkList).getByText(/0\.900/)).toBeInTheDocument()
+    expect(within(chunkList).getByText(/0\.500/)).toBeInTheDocument()
   })
 
-  it('shows at most 2 rows of query embedding values by default, with a Show more control', () => {
+  it('shows at most 2 rows of query embedding values by default, with a Show more control, once Query Embedding is chosen', async () => {
     const values = Array.from({ length: 24 }, (_, i) => i / 100)
     mockState({ turns: [makeTurn({ queryEmbedding: values })] })
-
     render(<PlaygroundScreen onNavigate={vi.fn()} />)
+
+    await openQueryEmbedding(/refund/i)
 
     const preview = screen.getByTestId('playground-embedding-preview')
     expect(preview).toHaveTextContent('0.15')
@@ -260,8 +273,9 @@ describe('PlaygroundScreen — every turn shows its own retrieved chunks and que
     const userEvent = (await import('@testing-library/user-event')).default
     const values = Array.from({ length: 24 }, (_, i) => i / 100)
     mockState({ turns: [makeTurn({ queryEmbedding: values })] })
-
     render(<PlaygroundScreen onNavigate={vi.fn()} />)
+    await openQueryEmbedding(/refund/i)
+
     await userEvent.click(screen.getByRole('button', { name: /show more embedding values/i }))
 
     expect(screen.getByTestId('playground-embedding-preview')).toHaveTextContent('0.23')
@@ -288,10 +302,8 @@ describe('PlaygroundScreen — every turn shows its own retrieved chunks and que
     const newerTurnEl = screen.getByTestId('turn-turn-newer')
     expect(within(olderTurnEl).getByText('Older question?')).toBeInTheDocument()
     expect(within(olderTurnEl).getByText('Older answer.')).toBeInTheDocument()
-    expect(within(olderTurnEl).getByText(/CHUNK_0/)).toBeInTheDocument()
     expect(within(newerTurnEl).getByText('Newer question?')).toBeInTheDocument()
     expect(within(newerTurnEl).getByText('Newer answer.')).toBeInTheDocument()
-    expect(within(newerTurnEl).getByText(/CHUNK_5/)).toBeInTheDocument()
   })
 })
 
@@ -339,8 +351,49 @@ describe('PlaygroundScreen — deep linking (034-more-deep-links)', () => {
     mockState({ turns: [turn] })
 
     render(<PlaygroundScreen onNavigate={vi.fn()} />)
-    await userEvent.click(screen.getByRole('button', { name: /copy link to what is the refund policy/i }))
+    await userEvent.click(screen.getByRole('button', { name: /actions for what is the refund policy/i }))
+    await userEvent.click(screen.getByRole('menuitem', { name: /copy link/i }))
 
     expect(writeText.mock.calls[0][0]).toMatch(/\/playground\/[^/]*\/turn-9$/)
+  })
+})
+
+describe('PlaygroundScreen — document dropdown deep link (035-document-scope-deep-links)', () => {
+  it('calls onDocumentSelected when the Select Document dropdown changes', async () => {
+    const userEvent = (await import('@testing-library/user-event')).default
+    mockState({ documents: [makeDoc({ id: 'report.pdf' }), makeDoc({ id: 'other.pdf', name: 'other.pdf' })] })
+    const onDocumentSelected = vi.fn()
+
+    render(<PlaygroundScreen onNavigate={vi.fn()} onDocumentSelected={onDocumentSelected} />)
+    await userEvent.selectOptions(screen.getByLabelText('Select document'), 'other.pdf')
+
+    expect(onDocumentSelected).toHaveBeenCalledWith('other.pdf')
+  })
+
+  it('calls onDocumentSelected with the Entire Corpus sentinel when that option is chosen', async () => {
+    const userEvent = (await import('@testing-library/user-event')).default
+    mockState({ documents: [makeDoc({ id: 'report.pdf' })] })
+    const onDocumentSelected = vi.fn()
+
+    render(<PlaygroundScreen onNavigate={vi.fn()} onDocumentSelected={onDocumentSelected} />)
+    await userEvent.selectOptions(screen.getByLabelText('Select document'), ENTIRE_CORPUS_SELECTION)
+
+    expect(onDocumentSelected).toHaveBeenCalledWith(ENTIRE_CORPUS_SELECTION)
+  })
+
+  it('selects the linked document from a deep link', () => {
+    mockState({ documents: [makeDoc({ id: 'report.pdf' }), makeDoc({ id: 'other.pdf', name: 'other.pdf' })] })
+
+    render(<PlaygroundScreen onNavigate={vi.fn()} linkedDocumentId="other.pdf" />)
+
+    expect(screen.getByLabelText('Select document')).toHaveValue('other.pdf')
+  })
+
+  it('selects Entire Corpus from a linkedDocumentId deep link', () => {
+    mockState({ documents: [makeDoc({ id: 'report.pdf' })] })
+
+    render(<PlaygroundScreen onNavigate={vi.fn()} linkedDocumentId={ENTIRE_CORPUS_SELECTION} />)
+
+    expect(screen.getByLabelText('Select document')).toHaveValue(ENTIRE_CORPUS_SELECTION)
   })
 })

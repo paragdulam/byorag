@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db.lookups import get_corpus_owned_by, get_document_owned_by, get_golden_dataset_entry_owned_by
 from app.db.models import Chunk as ChunkRow
-from app.db.models import Document, DocumentCorpus, GoldenDatasetEntry, GoldenDatasetEntryChunk
+from app.db.models import Document, GoldenDatasetEntry, GoldenDatasetEntryChunk
 from app.embeddings.models.base import EMBEDDING_MODELS
 from app.generation.providers.base import GENERATION_PROVIDERS, GenerationError
 from app.golden_dataset.schemas import (
@@ -97,16 +97,20 @@ def merge_candidates(
     rrf_scores: dict[str, float] = {}
     matched_question: dict[str, bool] = {}
     matched_answer: dict[str, bool] = {}
+    question_score: dict[str, float] = {}
+    answer_score: dict[str, float] = {}
     chunk_by_id: dict[str, Any] = {}
 
-    for rank, (chunk, _embedding_id, _score) in enumerate(question_results, start=1):
+    for rank, (chunk, _embedding_id, score) in enumerate(question_results, start=1):
         rrf_scores[chunk.id] = rrf_scores.get(chunk.id, 0.0) + 1.0 / (rank + RRF_K)
         matched_question[chunk.id] = True
+        question_score[chunk.id] = score
         chunk_by_id[chunk.id] = chunk
 
-    for rank, (chunk, _embedding_id, _score) in enumerate(answer_results, start=1):
+    for rank, (chunk, _embedding_id, score) in enumerate(answer_results, start=1):
         rrf_scores[chunk.id] = rrf_scores.get(chunk.id, 0.0) + 1.0 / (rank + RRF_K)
         matched_answer[chunk.id] = True
+        answer_score[chunk.id] = score
         chunk_by_id[chunk.id] = chunk
 
     ordered_ids = sorted(rrf_scores, key=lambda chunk_id: rrf_scores[chunk_id], reverse=True)
@@ -119,6 +123,9 @@ def merge_candidates(
             content=chunk_by_id[chunk_id].content,
             matchedQuestion=matched_question.get(chunk_id, False),
             matchedAnswer=matched_answer.get(chunk_id, False),
+            # Prefer the question-search's own raw similarity when a chunk matched both —
+            # question is always searched, answer only when given (research.md §1).
+            score=question_score.get(chunk_id, answer_score.get(chunk_id)),
         )
         for chunk_id in ordered_ids[:CANDIDATE_LIMIT]
     ]
@@ -324,8 +331,7 @@ def _scope_chunk_query(corpus_id: str, document_id: str | None):
     return (
         select(ChunkRow)
         .join(Document, Document.id == ChunkRow.document_id)
-        .join(DocumentCorpus, DocumentCorpus.document_id == Document.id)
-        .where(DocumentCorpus.corpus_id == corpus_id)
+        .where(Document.corpus_id == corpus_id)
     )
 
 

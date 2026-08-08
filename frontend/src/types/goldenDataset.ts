@@ -8,6 +8,10 @@ export interface GoldenCandidate {
   content: string
   matchedQuestion: boolean
   matchedAnswer: boolean
+  /** Cosine similarity from whichever search matched this chunk (033-ui-ux-polish) — absent
+   * for candidates synthesized locally from an existing entry's already-saved chunks, which
+   * were never scored against a live search. */
+  score?: number
 }
 
 export interface GoldenEntryChunk {

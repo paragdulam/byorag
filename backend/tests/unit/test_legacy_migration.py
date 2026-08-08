@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db.hashing import compute_content_hash
 from app.db.legacy_migration import UNCATEGORIZED_CORPUS_NAME, migrate_legacy_pdfs
-from app.db.models import Corpus, Document, DocumentCorpus
+from app.db.models import Corpus, Document
 
 
 def _uncategorized_corpora(db_session: Session) -> list[Corpus]:
@@ -35,13 +35,7 @@ def test_migrate_legacy_pdfs_creates_documents_in_uncategorized_corpus(
         )
     ).scalars().all()
     assert {d.name for d in documents} == {"a.pdf", "b.pdf"}
-    links = db_session.execute(
-        select(DocumentCorpus).where(
-            DocumentCorpus.document_id.in_([d.id for d in documents]),
-            DocumentCorpus.corpus_id == corpora[0].id,
-        )
-    ).scalars().all()
-    assert len(links) == 2
+    assert all(d.corpus_id == corpora[0].id for d in documents)
 
 
 def test_migrate_legacy_pdfs_is_idempotent(db_session: Session, tmp_path: Path) -> None:

@@ -3,11 +3,12 @@ import { AppShell } from '../layout/AppShell'
 import type { ScreenId } from '../layout/SidebarNav'
 import { useFixedSizeChunking } from '../../hooks/useFixedSizeChunking'
 import { useCorpus } from '../../context/CorpusContext'
-import { ENTIRE_CORPUS_SELECTION } from '../../lib/entireCorpusSelection'
+import { ENTIRE_CORPUS_SELECTION, isEntireCorpusSelection } from '../../lib/entireCorpusSelection'
 import { BatchProgressBar } from '../shared/BatchProgressBar'
 import { AlreadyDoneIndicator } from '../shared/AlreadyDoneIndicator'
 import { EntireCorpusSummaryList } from '../shared/EntireCorpusSummaryList'
 import { ChunkInContextPreview } from './ChunkInContextPreview'
+import { buildChunkingChunkLink } from '../../router/urlScheme'
 
 export interface FixedSizeChunkingScreenProps {
   onNavigate: (screen: ScreenId) => void
@@ -17,6 +18,10 @@ export interface FixedSizeChunkingScreenProps {
   /** Called whenever the selected document or chunk changes (deep link open, or a plain in-app
    * click), so the caller can keep the URL in sync. */
   onSelectionChanged?: (documentId: string, chunkIndex: number) => void
+  /** Called whenever the "Select Document" dropdown changes on its own, independent of any
+   * chunk selection (035-document-scope-deep-links) — may be a real document id or the
+   * `ENTIRE_CORPUS_SELECTION` sentinel. */
+  onDocumentSelected?: (documentId: string) => void
 }
 
 const SEPARATOR_OPTIONS = ['"\\n\\n"', '"\\n"', '" "', '""']
@@ -26,6 +31,7 @@ export function FixedSizeChunkingScreen({
   linkedDocumentId,
   linkedChunkIndex,
   onSelectionChanged,
+  onDocumentSelected,
 }: FixedSizeChunkingScreenProps) {
   const { activeCorpusId } = useCorpus()
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>('')
@@ -53,9 +59,13 @@ export function FixedSizeChunkingScreen({
   const [overlapValue, setOverlapValue] = useState(50)
   const [selectedChunkIndex, setSelectedChunkIndex] = useState(0)
 
-  // Deep link (034-more-deep-links): selects the linked document so its chunks load.
+  // Deep link (034-more-deep-links, extended by 035-document-scope-deep-links for Entire
+  // Corpus): selects the linked document/scope so its chunks load.
   useEffect(() => {
-    if (linkedDocumentId != null && documents.some((doc) => doc.id === linkedDocumentId)) {
+    if (
+      linkedDocumentId != null &&
+      (isEntireCorpusSelection(linkedDocumentId) || documents.some((doc) => doc.id === linkedDocumentId))
+    ) {
       setSelectedDocumentId(linkedDocumentId)
     }
   }, [linkedDocumentId, documents])
@@ -76,11 +86,22 @@ export function FixedSizeChunkingScreen({
 
   const isAutoLoaded = chunkOrigin === 'auto-loaded' && status === 'success'
 
+  function selectDocument(documentId: string) {
+    setSelectedDocumentId(documentId)
+    onDocumentSelected?.(documentId)
+  }
+
   function selectChunk(chunkIndex: number) {
     setSelectedChunkIndex(chunkIndex)
     if (activeDocumentId !== '') {
       onSelectionChanged?.(activeDocumentId, chunkIndex)
     }
+  }
+
+  function handleCopyChunkLink(chunkIndex: number) {
+    const path = buildChunkingChunkLink(activeCorpusId ?? '', activeDocumentId, chunkIndex)
+    const url = `${window.location.origin}${path}`
+    void navigator.clipboard.writeText(url)
   }
 
   const handleRunChunking = () => {
@@ -128,7 +149,7 @@ export function FixedSizeChunkingScreen({
                   id="chunking-document"
                   aria-label="Select document"
                   value={activeDocumentId}
-                  onChange={(event) => setSelectedDocumentId(event.target.value)}
+                  onChange={(event) => selectDocument(event.target.value)}
                   className="mt-1 rounded border border-outline-variant bg-surface p-2 text-on-surface"
                 >
                   <option value={ENTIRE_CORPUS_SELECTION}>Entire Corpus</option>
@@ -274,24 +295,45 @@ export function FixedSizeChunkingScreen({
                     <div className="flex min-h-0 flex-1 gap-4">
                       <div className="flex w-1/2 flex-col gap-3 overflow-y-auto">
                         {result.chunks.map((chunk) => (
-                          <button
+                          <div
                             key={chunk.index}
-                            type="button"
                             data-testid={`fixed-size-chunk-${chunk.index}`}
                             aria-current={chunk.index === selectedChunkIndex ? 'true' : undefined}
+                            aria-label={`Chunk ${chunk.index}`}
+                            role="button"
+                            tabIndex={0}
                             onClick={() => selectChunk(chunk.index)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault()
+                                selectChunk(chunk.index)
+                              }
+                            }}
                             className={
-                              'rounded-lg border p-4 text-left ' +
+                              'cursor-pointer rounded-lg border p-4 text-left ' +
                               (chunk.index === selectedChunkIndex
                                 ? 'border-primary bg-surface-container-high'
                                 : 'border-outline-variant bg-surface-container')
                             }
                           >
-                            <div className="font-mono text-xs text-tertiary">
-                              CHUNK_{chunk.index}
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="font-mono text-xs text-tertiary">
+                                CHUNK_{chunk.index}
+                              </div>
+                              <button
+                                type="button"
+                                aria-label={`Copy link to chunk ${chunk.index}`}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  handleCopyChunkLink(chunk.index)
+                                }}
+                                className="rounded border border-outline-variant px-2 py-1 text-xs text-on-surface hover:bg-surface-container-high"
+                              >
+                                Copy link
+                              </button>
                             </div>
                             <p className="mt-2 text-on-surface">{chunk.content}</p>
-                          </button>
+                          </div>
                         ))}
 
                         {result.totalChunks > result.chunks.length && (

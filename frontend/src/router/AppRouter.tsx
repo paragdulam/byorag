@@ -8,7 +8,10 @@ import { buildPath, parseRoute } from './urlScheme'
 /** The current `AppRoute` parsed from the browser URL (032-deep-linking). */
 export function useAppRoute(): AppRoute | null {
   const location = useLocation()
-  return useMemo(() => parseRoute(location.pathname), [location.pathname])
+  return useMemo(
+    () => parseRoute(location.pathname, location.search),
+    [location.pathname, location.search],
+  )
 }
 
 export interface NavigateOptions {
@@ -32,6 +35,11 @@ export interface AppNavigate {
   ) => void
   navigateToVectorChunk: (corpusId: string, chunkId: string, options?: NavigateOptions) => void
   navigateToTurn: (corpusId: string, turnId: string, options?: NavigateOptions) => void
+  navigateToChunkingDocument: (corpusId: string, documentId: string, options?: NavigateOptions) => void
+  navigateToEmbeddingsDocument: (corpusId: string, documentId: string, options?: NavigateOptions) => void
+  navigateToVectorViewDocument: (corpusId: string, documentId: string, options?: NavigateOptions) => void
+  navigateToGoldenDatasetDocument: (corpusId: string, documentId: string, options?: NavigateOptions) => void
+  navigateToPlaygroundDocument: (corpusId: string, documentId: string, options?: NavigateOptions) => void
 }
 
 /**
@@ -113,6 +121,55 @@ export function useAppNavigate(): AppNavigate {
     [navigate],
   )
 
+  // 035-document-scope-deep-links: each screen's own document/scope <select> — every one below
+  // resets the screen's other entity fields (chunk/entry/turn) via `baseRoute`, matching the
+  // existing "changing scope invalidates whatever was selected under the old scope" behavior
+  // already enforced in each screen's own state.
+  const navigateToChunkingDocument = useCallback(
+    (corpusId: string, documentId: string, options?: NavigateOptions) => {
+      navigate(buildPath({ ...baseRoute('fixed-size-chunking', corpusId), documentId }), {
+        replace: options?.replace ?? true,
+      })
+    },
+    [navigate],
+  )
+
+  const navigateToEmbeddingsDocument = useCallback(
+    (corpusId: string, documentId: string, options?: NavigateOptions) => {
+      navigate(buildPath({ ...baseRoute('embeddings', corpusId), documentId }), {
+        replace: options?.replace ?? true,
+      })
+    },
+    [navigate],
+  )
+
+  const navigateToVectorViewDocument = useCallback(
+    (corpusId: string, documentId: string, options?: NavigateOptions) => {
+      navigate(buildPath({ ...baseRoute('vector-view', corpusId), documentId }), {
+        replace: options?.replace ?? true,
+      })
+    },
+    [navigate],
+  )
+
+  const navigateToGoldenDatasetDocument = useCallback(
+    (corpusId: string, documentId: string, options?: NavigateOptions) => {
+      navigate(buildPath({ ...baseRoute('golden-dataset', corpusId), documentId }), {
+        replace: options?.replace ?? true,
+      })
+    },
+    [navigate],
+  )
+
+  const navigateToPlaygroundDocument = useCallback(
+    (corpusId: string, documentId: string, options?: NavigateOptions) => {
+      navigate(buildPath({ ...baseRoute('playground', corpusId), documentId }), {
+        replace: options?.replace ?? true,
+      })
+    },
+    [navigate],
+  )
+
   return useMemo(
     () => ({
       navigateToScreen,
@@ -123,6 +180,11 @@ export function useAppNavigate(): AppNavigate {
       navigateToChunkingChunk,
       navigateToVectorChunk,
       navigateToTurn,
+      navigateToChunkingDocument,
+      navigateToEmbeddingsDocument,
+      navigateToVectorViewDocument,
+      navigateToGoldenDatasetDocument,
+      navigateToPlaygroundDocument,
     }),
     [
       navigateToScreen,
@@ -133,6 +195,11 @@ export function useAppNavigate(): AppNavigate {
       navigateToChunkingChunk,
       navigateToVectorChunk,
       navigateToTurn,
+      navigateToChunkingDocument,
+      navigateToEmbeddingsDocument,
+      navigateToVectorViewDocument,
+      navigateToGoldenDatasetDocument,
+      navigateToPlaygroundDocument,
     ],
   )
 }

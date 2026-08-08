@@ -15,11 +15,23 @@ export interface VectorViewScreenProps {
   /** Called whenever the selected chunk changes (deep link open, or a plain in-app click), so
    * the caller can keep the URL in sync. */
   onChunkLinked?: (chunkId: string) => void
+  /** A document/scope to select directly, per a deep link (035-document-scope-deep-links) — a
+   * real document id or the `ENTIRE_CORPUS_SELECTION` sentinel. */
+  linkedDocumentId?: string | null
+  /** Called whenever the "Select Document" dropdown changes, so the caller can keep the URL in
+   * sync. */
+  onDocumentSelected?: (documentId: string) => void
 }
 
 const VECTOR_GRID_COLUMNS = 8
 
-export function VectorViewScreen({ onNavigate, linkedChunkId, onChunkLinked }: VectorViewScreenProps) {
+export function VectorViewScreen({
+  onNavigate,
+  linkedChunkId,
+  onChunkLinked,
+  linkedDocumentId,
+  onDocumentSelected,
+}: VectorViewScreenProps) {
   const { activeCorpusId } = useCorpus()
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>('')
   const [selectedChunkId, setSelectedChunkId] = useState<string>('')
@@ -58,6 +70,23 @@ export function VectorViewScreen({ onNavigate, linkedChunkId, onChunkLinked }: V
         : (documents[0]?.id ?? ''),
     )
   }, [documents])
+
+  // Deep link (035-document-scope-deep-links): selects the linked document/scope — runs after
+  // the auto-select effect above so it wins for the same `documents` change. Guarded on "not
+  // already selected" so it doesn't refire every time `selectDocument` echoes its own choice
+  // back in as the next `linkedDocumentId` (same self-triggering-loop fix as the linkedChunkId
+  // effect below).
+  useEffect(() => {
+    if (
+      linkedDocumentId != null &&
+      linkedDocumentId !== selectedDocumentId &&
+      (isEntireCorpusSelection(linkedDocumentId) || documents.some((doc) => doc.id === linkedDocumentId))
+    ) {
+      setSelectedDocumentId(linkedDocumentId)
+      setSelectedChunkId('')
+      setSelectedEmbeddingId('')
+    }
+  }, [linkedDocumentId, documents, selectedDocumentId])
 
   const flatChunks = isEntireCorpus ? chunkGroups.flatMap((group) => group.chunks) : savedChunks
 
@@ -105,6 +134,13 @@ export function VectorViewScreen({ onNavigate, linkedChunkId, onChunkLinked }: V
     onChunkLinked?.(chunkId)
   }
 
+  const selectDocument = (documentId: string) => {
+    setSelectedDocumentId(documentId)
+    setSelectedChunkId('')
+    setSelectedEmbeddingId('')
+    onDocumentSelected?.(documentId)
+  }
+
   return (
     <AppShell activeScreen="vector-view" onNavigate={onNavigate}>
       <div className="flex h-full min-h-0 flex-col">
@@ -129,11 +165,7 @@ export function VectorViewScreen({ onNavigate, linkedChunkId, onChunkLinked }: V
                 id="vector-view-document"
                 aria-label="Select document"
                 value={activeDocumentId}
-                onChange={(event) => {
-                  setSelectedDocumentId(event.target.value)
-                  setSelectedChunkId('')
-                  setSelectedEmbeddingId('')
-                }}
+                onChange={(event) => selectDocument(event.target.value)}
                 className="mt-1 rounded border border-outline-variant bg-surface p-2 text-on-surface"
               >
                 <option value={ENTIRE_CORPUS_SELECTION}>Entire Corpus</option>

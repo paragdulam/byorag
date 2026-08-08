@@ -12,14 +12,6 @@ export interface SourceDocument {
   status: SourceDocumentStatus
 }
 
-// A document annotated with every corpus it's currently associated with —
-// used by the Corpora screen's "add existing document" picker to exclude
-// documents already in the corpus being managed (009-corpora-screen,
-// data-model.md).
-export interface DocumentWithCorpora extends SourceDocument {
-  corpusIds: string[]
-}
-
 export type UploadRejectionReason = 'invalid-type' | 'too-large' | 'save-failed'
 
 export interface UploadRejection {

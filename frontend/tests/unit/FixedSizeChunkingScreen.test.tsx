@@ -733,15 +733,21 @@ describe('FixedSizeChunkingScreen — in-context chunk preview (023-pdf-fullscre
 
     render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
 
-    const firstCard = screen.getByText(/CHUNK_0/).closest('button')
-    const secondCard = screen.getByText(/CHUNK_1/).closest('button')
+    const firstCard = screen.getByText(/CHUNK_0/).closest('[role="button"]')
+    const secondCard = screen.getByText(/CHUNK_1/).closest('[role="button"]')
     expect(firstCard).toHaveAttribute('aria-current', 'true')
     expect(secondCard).not.toHaveAttribute('aria-current', 'true')
 
     await userEvent.click(screen.getByText(/CHUNK_1/))
 
-    expect(screen.getByText(/CHUNK_0/).closest('button')).not.toHaveAttribute('aria-current', 'true')
-    expect(screen.getByText(/CHUNK_1/).closest('button')).toHaveAttribute('aria-current', 'true')
+    expect(screen.getByText(/CHUNK_0/).closest('[role="button"]')).not.toHaveAttribute(
+      'aria-current',
+      'true',
+    )
+    expect(screen.getByText(/CHUNK_1/).closest('[role="button"]')).toHaveAttribute(
+      'aria-current',
+      'true',
+    )
   })
 
   it('passes hasUnsavedChanges=true to the in-context preview for a fresh, unsaved computed result', () => {
@@ -782,6 +788,38 @@ describe('FixedSizeChunkingScreen — in-context chunk preview (023-pdf-fullscre
 
     expect(screen.queryByTestId('mock-chunk-context-preview')).not.toBeInTheDocument()
     expect(screen.queryByTestId('chunk-context-preview')).not.toBeInTheDocument()
+  })
+})
+
+describe('FixedSizeChunkingScreen — chunk Copy Link (033-ui-ux-polish US3)', () => {
+  it('writes the deep link to a chunk to the clipboard, without changing the selected chunk', async () => {
+    const writeText = vi.fn()
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    mockState({
+      activeDocumentId: 'report.pdf',
+      status: 'success',
+      result: {
+        chunks: [
+          { index: 0, content: 'first chunk text' },
+          { index: 1, content: 'second chunk text' },
+        ],
+        totalChunks: 2,
+        strategy: 'fixed-size',
+        chunkSize: 50,
+        overlap: 0,
+      },
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} />)
+    // selectedChunkIndex defaults to 0 on a fresh result — copy chunk 1's link instead so a
+    // selection change (if the button were wired wrong) would be visible.
+    await userEvent.click(
+      within(screen.getByTestId('fixed-size-chunk-1')).getByRole('button', { name: /copy link/i }),
+    )
+
+    expect(writeText.mock.calls[0][0]).toMatch(/\/fixed-size-chunking\/[^/]*\/report\.pdf\/1$/)
+    expect(screen.getByTestId('fixed-size-chunk-0')).toHaveAttribute('aria-current', 'true')
+    expect(screen.getByTestId('fixed-size-chunk-1')).not.toHaveAttribute('aria-current', 'true')
   })
 })
 
@@ -830,5 +868,49 @@ describe('FixedSizeChunkingScreen — deep linking (034-more-deep-links)', () =>
     await userEvent.click(screen.getByTestId('fixed-size-chunk-1'))
 
     expect(onSelectionChanged).toHaveBeenCalledWith('report.pdf', 1)
+  })
+})
+
+describe('FixedSizeChunkingScreen — document dropdown deep link (035-document-scope-deep-links)', () => {
+  it('calls onDocumentSelected when the Select Document dropdown changes, independent of any chunk', async () => {
+    mockState({
+      documents: [makeDoc({ id: 'report.pdf' }), makeDoc({ id: 'other.pdf', name: 'other.pdf' })],
+    })
+    const onDocumentSelected = vi.fn()
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} onDocumentSelected={onDocumentSelected} />)
+    await userEvent.selectOptions(screen.getByLabelText('Select document'), 'other.pdf')
+
+    expect(onDocumentSelected).toHaveBeenCalledWith('other.pdf')
+  })
+
+  it('calls onDocumentSelected with the Entire Corpus sentinel when that option is chosen', async () => {
+    mockState({ documents: [makeDoc({ id: 'report.pdf' })] })
+    const onDocumentSelected = vi.fn()
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} onDocumentSelected={onDocumentSelected} />)
+    await userEvent.selectOptions(screen.getByLabelText('Select document'), ENTIRE_CORPUS_SELECTION)
+
+    expect(onDocumentSelected).toHaveBeenCalledWith(ENTIRE_CORPUS_SELECTION)
+  })
+
+  it('selects the linked document from a deep link with no chunk index', () => {
+    mockState({
+      documents: [makeDoc({ id: 'report.pdf' }), makeDoc({ id: 'other.pdf', name: 'other.pdf' })],
+    })
+
+    render(<FixedSizeChunkingScreen onNavigate={vi.fn()} linkedDocumentId="other.pdf" />)
+
+    expect(screen.getByLabelText('Select document')).toHaveValue('other.pdf')
+  })
+
+  it('selects Entire Corpus from a linkedDocumentId deep link', () => {
+    mockState({ documents: [makeDoc({ id: 'report.pdf' })] })
+
+    render(
+      <FixedSizeChunkingScreen onNavigate={vi.fn()} linkedDocumentId={ENTIRE_CORPUS_SELECTION} />,
+    )
+
+    expect(screen.getByLabelText('Select document')).toHaveValue(ENTIRE_CORPUS_SELECTION)
   })
 })

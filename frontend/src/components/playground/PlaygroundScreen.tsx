@@ -10,9 +10,23 @@ export interface PlaygroundScreenProps {
   onNavigate: (screen: ScreenId) => void
   /** A turn to scroll to and highlight directly, per a deep link (034-more-deep-links). */
   linkedTurnId?: string | null
+  /** Navigates to a cited chunk's own screen from a turn's answer (033-ui-ux-polish US6). */
+  onGoToChunk?: (documentId: string, chunkIndex: number) => void
+  /** A document/scope to select directly, per a deep link (035-document-scope-deep-links) — a
+   * real document id or the `ENTIRE_CORPUS_SELECTION` sentinel. */
+  linkedDocumentId?: string | null
+  /** Called whenever the "Select Document" dropdown changes, so the caller can keep the URL in
+   * sync. */
+  onDocumentSelected?: (documentId: string) => void
 }
 
-export function PlaygroundScreen({ onNavigate, linkedTurnId }: PlaygroundScreenProps) {
+export function PlaygroundScreen({
+  onNavigate,
+  linkedTurnId,
+  onGoToChunk,
+  linkedDocumentId,
+  onDocumentSelected,
+}: PlaygroundScreenProps) {
   const { activeCorpusId } = useCorpus()
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>('')
   const [queryText, setQueryText] = useState('')
@@ -55,6 +69,26 @@ export function PlaygroundScreen({ onNavigate, linkedTurnId }: PlaygroundScreenP
     }
   }, [linkedTurnId, turns, isEntireCorpus])
 
+  // Deep link (035-document-scope-deep-links): selects the linked document/scope — runs after
+  // the linkedTurnId effect above so an explicit ?documentId= wins over the turn's own forced
+  // Entire Corpus fallback. Guarded on "not already selected" so it doesn't refire every time
+  // `selectDocument` echoes its own choice back in as the next `linkedDocumentId` (same
+  // self-triggering-loop fix as the linkedTurnId effect above).
+  useEffect(() => {
+    if (
+      linkedDocumentId != null &&
+      linkedDocumentId !== activeDocumentId &&
+      (isEntireCorpusSelection(linkedDocumentId) || documents.some((doc) => doc.id === linkedDocumentId))
+    ) {
+      setSelectedDocumentId(linkedDocumentId)
+    }
+  }, [linkedDocumentId, documents, activeDocumentId])
+
+  function selectDocument(documentId: string) {
+    setSelectedDocumentId(documentId)
+    onDocumentSelected?.(documentId)
+  }
+
   const handleSend = () => {
     send(queryText)
     setQueryText('')
@@ -85,7 +119,7 @@ export function PlaygroundScreen({ onNavigate, linkedTurnId }: PlaygroundScreenP
                 id="playground-document"
                 aria-label="Select document"
                 value={activeDocumentId}
-                onChange={(event) => setSelectedDocumentId(event.target.value)}
+                onChange={(event) => selectDocument(event.target.value)}
                 className="mt-1 rounded border border-outline-variant bg-surface p-2 text-on-surface"
               >
                 <option value={ENTIRE_CORPUS_SELECTION}>Entire Corpus</option>
@@ -148,6 +182,7 @@ export function PlaygroundScreen({ onNavigate, linkedTurnId }: PlaygroundScreenP
                     isGenerating={generatingTurnId === turn.id}
                     isLinked={turn.id === linkedTurnId}
                     onRetry={() => generate(turn.id)}
+                    onGoToChunk={onGoToChunk}
                   />
                 </div>
               ))}

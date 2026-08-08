@@ -81,6 +81,16 @@ describe('VectorViewScreen — standard navigation shell (014-vector-view-screen
   })
 })
 
+describe('VectorViewScreen — typography parity with Corpora (033-ui-ux-polish US5)', () => {
+  it('uses the Corpora-reference heading scale for the page title', () => {
+    mockState()
+
+    render(<VectorViewScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('heading', { name: 'Vector View' }).className).toContain('text-4xl')
+  })
+})
+
 describe('VectorViewScreen — two-pane chunk browsing and vector display (014-vector-view-screen US2)', () => {
   it('lists the saved chunks with content and position on the left', () => {
     mockState()
@@ -491,5 +501,67 @@ describe('VectorViewScreen — deep linking (034-more-deep-links)', () => {
     await userEvent.click(screen.getByTestId('vector-view-chunk-chunk-2'))
 
     expect(onChunkLinked).toHaveBeenCalledWith('chunk-2')
+  })
+})
+
+describe('VectorViewScreen — document dropdown deep link (035-document-scope-deep-links)', () => {
+  it('calls onDocumentSelected when the Select Document dropdown changes', async () => {
+    const userEvent = (await import('@testing-library/user-event')).default
+    mockState({ documents: [makeDoc({ id: 'report.pdf' }), makeDoc({ id: 'other.pdf', name: 'other.pdf' })] })
+    const onDocumentSelected = vi.fn()
+
+    render(<VectorViewScreen onNavigate={vi.fn()} onDocumentSelected={onDocumentSelected} />)
+    await userEvent.selectOptions(screen.getByLabelText('Select document'), 'other.pdf')
+
+    expect(onDocumentSelected).toHaveBeenCalledWith('other.pdf')
+  })
+
+  it('calls onDocumentSelected with the Entire Corpus sentinel when that option is chosen', async () => {
+    const userEvent = (await import('@testing-library/user-event')).default
+    mockState({ documents: [makeDoc({ id: 'report.pdf' })] })
+    const onDocumentSelected = vi.fn()
+
+    render(<VectorViewScreen onNavigate={vi.fn()} onDocumentSelected={onDocumentSelected} />)
+    await userEvent.selectOptions(screen.getByLabelText('Select document'), ENTIRE_CORPUS_SELECTION)
+
+    expect(onDocumentSelected).toHaveBeenCalledWith(ENTIRE_CORPUS_SELECTION)
+  })
+
+  it('selects the linked document from a deep link', () => {
+    mockState({ documents: [makeDoc({ id: 'report.pdf' }), makeDoc({ id: 'other.pdf', name: 'other.pdf' })] })
+
+    render(<VectorViewScreen onNavigate={vi.fn()} linkedDocumentId="other.pdf" />)
+
+    expect(screen.getByLabelText('Select document')).toHaveValue('other.pdf')
+  })
+
+  it('selects Entire Corpus from a linkedDocumentId deep link', () => {
+    mockState({ documents: [makeDoc({ id: 'report.pdf' })] })
+
+    render(<VectorViewScreen onNavigate={vi.fn()} linkedDocumentId={ENTIRE_CORPUS_SELECTION} />)
+
+    expect(screen.getByLabelText('Select document')).toHaveValue(ENTIRE_CORPUS_SELECTION)
+  })
+
+  it('does not block selecting a chunk once the linked document is already the active one', async () => {
+    // Regression guard, matching the earlier self-triggering-loop fix for linkedChunkId: the
+    // linkedDocumentId effect must not keep resetting selectedChunkId/selectedEmbeddingId once
+    // the document is already synced, or clicking a chunk right after landing on a document deep
+    // link would immediately get wiped out on the next render.
+    const userEvent = (await import('@testing-library/user-event')).default
+    mockState({ documents: [makeDoc({ id: 'report.pdf' })] })
+    const onChunkLinked = vi.fn()
+
+    render(
+      <VectorViewScreen
+        onNavigate={vi.fn()}
+        linkedDocumentId="report.pdf"
+        onChunkLinked={onChunkLinked}
+      />,
+    )
+    await userEvent.click(screen.getByTestId('vector-view-chunk-chunk-2'))
+
+    expect(onChunkLinked).toHaveBeenCalledWith('chunk-2')
+    expect(screen.getByTestId('vector-view-chunk-chunk-2')).toHaveAttribute('aria-pressed', 'true')
   })
 })

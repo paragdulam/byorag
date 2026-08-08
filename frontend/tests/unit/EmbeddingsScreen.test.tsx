@@ -86,6 +86,16 @@ describe('EmbeddingsScreen — standard navigation shell', () => {
   })
 })
 
+describe('EmbeddingsScreen — typography parity with Corpora (033-ui-ux-polish US4)', () => {
+  it('uses the Corpora-reference heading scale for the page title', () => {
+    mockState()
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('heading', { name: 'Embeddings' }).className).toContain('text-4xl')
+  })
+})
+
 describe('EmbeddingsScreen — saved chunks and model picker (013-bert-pgvector-embeddings US1)', () => {
   it('renders a document dropdown and a model dropdown', () => {
     mockState()
@@ -548,5 +558,45 @@ describe('EmbeddingsScreen — existing saved embeddings (adjacent fix, post-021
 
     expect(screen.getByTestId('already-done-indicator')).toBeInTheDocument()
     expect(screen.queryByText(/no saved chunks for this document yet/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('EmbeddingsScreen — document dropdown deep link (035-document-scope-deep-links)', () => {
+  it('calls onDocumentSelected when the Select Document dropdown changes', async () => {
+    const userEvent = (await import('@testing-library/user-event')).default
+    mockState({ documents: [makeDoc({ id: 'report.pdf' }), makeDoc({ id: 'other.pdf', name: 'other.pdf' })] })
+    const onDocumentSelected = vi.fn()
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} onDocumentSelected={onDocumentSelected} />)
+    await userEvent.selectOptions(screen.getByLabelText('Select document'), 'other.pdf')
+
+    expect(onDocumentSelected).toHaveBeenCalledWith('other.pdf')
+  })
+
+  it('calls onDocumentSelected with the Entire Corpus sentinel when that option is chosen', async () => {
+    const userEvent = (await import('@testing-library/user-event')).default
+    mockState({ documents: [makeDoc({ id: 'report.pdf' })] })
+    const onDocumentSelected = vi.fn()
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} onDocumentSelected={onDocumentSelected} />)
+    await userEvent.selectOptions(screen.getByLabelText('Select document'), ENTIRE_CORPUS_SELECTION)
+
+    expect(onDocumentSelected).toHaveBeenCalledWith(ENTIRE_CORPUS_SELECTION)
+  })
+
+  it('selects the linked document from a deep link', () => {
+    mockState({ documents: [makeDoc({ id: 'report.pdf' }), makeDoc({ id: 'other.pdf', name: 'other.pdf' })] })
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} linkedDocumentId="other.pdf" />)
+
+    expect(screen.getByLabelText('Select document')).toHaveValue('other.pdf')
+  })
+
+  it('selects Entire Corpus from a linkedDocumentId deep link', () => {
+    mockState({ documents: [makeDoc({ id: 'report.pdf' })] })
+
+    render(<EmbeddingsScreen onNavigate={vi.fn()} linkedDocumentId={ENTIRE_CORPUS_SELECTION} />)
+
+    expect(screen.getByLabelText('Select document')).toHaveValue(ENTIRE_CORPUS_SELECTION)
   })
 })

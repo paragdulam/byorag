@@ -10,9 +10,15 @@ import { EntireCorpusSummaryList } from '../shared/EntireCorpusSummaryList'
 
 export interface EmbeddingsScreenProps {
   onNavigate: (screen: ScreenId) => void
+  /** A document/scope to select directly, per a deep link (035-document-scope-deep-links) — a
+   * real document id or the `ENTIRE_CORPUS_SELECTION` sentinel. */
+  linkedDocumentId?: string | null
+  /** Called whenever the "Select Document" dropdown changes, so the caller can keep the URL in
+   * sync. */
+  onDocumentSelected?: (documentId: string) => void
 }
 
-export function EmbeddingsScreen({ onNavigate }: EmbeddingsScreenProps) {
+export function EmbeddingsScreen({ onNavigate, linkedDocumentId, onDocumentSelected }: EmbeddingsScreenProps) {
   const { activeCorpusId } = useCorpus()
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>('')
   const [selectedModel, setSelectedModel] = useState<string>('')
@@ -57,6 +63,22 @@ export function EmbeddingsScreen({ onNavigate }: EmbeddingsScreenProps) {
     setSelectedModel((prev) => (models.some((model) => model.id === prev) ? prev : (models[0]?.id ?? '')))
   }, [models])
 
+  // Deep link (035-document-scope-deep-links): selects the linked document/scope — runs after
+  // the auto-select effect above so it wins for the same `documents` change.
+  useEffect(() => {
+    if (
+      linkedDocumentId != null &&
+      (isEntireCorpusSelection(linkedDocumentId) || documents.some((doc) => doc.id === linkedDocumentId))
+    ) {
+      setSelectedDocumentId(linkedDocumentId)
+    }
+  }, [linkedDocumentId, documents])
+
+  function selectDocument(documentId: string) {
+    setSelectedDocumentId(documentId)
+    onDocumentSelected?.(documentId)
+  }
+
   const activeDocumentId = selectedDocumentId || documents[0]?.id || ''
 
   return (
@@ -90,7 +112,7 @@ export function EmbeddingsScreen({ onNavigate }: EmbeddingsScreenProps) {
                   id="embeddings-document"
                   aria-label="Select document"
                   value={activeDocumentId}
-                  onChange={(event) => setSelectedDocumentId(event.target.value)}
+                  onChange={(event) => selectDocument(event.target.value)}
                   className="mt-1 rounded border border-outline-variant bg-surface p-2 text-on-surface"
                 >
                   <option value={ENTIRE_CORPUS_SELECTION}>Entire Corpus</option>

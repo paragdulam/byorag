@@ -8,10 +8,8 @@ from app.db.lookups import get_corpus_owned_by, get_document_owned_by
 from app.db.models import User
 from app.sources import service
 from app.sources.schemas import (
-    AttachDocumentRequest,
     DeleteSourcesRequest,
     DeleteSourcesResponse,
-    ListAllSourcesResponse,
     ListSourcesResponse,
     UploadRejection,
     UploadSourcesResponse,
@@ -31,13 +29,6 @@ def list_sources(
     if get_corpus_owned_by(db, corpusId, user.id) is None:
         raise HTTPException(status_code=404, detail=f"No corpus found with id '{corpusId}'")
     return ListSourcesResponse(documents=service.list_documents(db, corpusId))
-
-
-@router.get("/all", response_model=ListAllSourcesResponse)
-def list_all_sources(
-    db: Session = Depends(get_db), user: User = Depends(require_user)
-) -> ListAllSourcesResponse:
-    return ListAllSourcesResponse(documents=service.list_all_documents(db, user.id))
 
 
 @router.post("", response_model=UploadSourcesResponse)
@@ -85,35 +76,3 @@ def delete_sources(
     user: User = Depends(require_user),
 ) -> DeleteSourcesResponse:
     return DeleteSourcesResponse(results=service.delete_documents(db, user.id, request.ids))
-
-
-@router.post("/{document_id}/corpora", status_code=204)
-def attach_document_to_corpus(
-    document_id: str,
-    request: AttachDocumentRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_user),
-) -> None:
-    try:
-        service.attach_document_to_corpus(db, user.id, document_id, request.corpusId)
-    except service.DocumentNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except service.CorpusNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@router.delete("/{document_id}/corpora/{corpus_id}", status_code=204)
-def unlink_document_from_corpus(
-    document_id: str,
-    corpus_id: str,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_user),
-) -> None:
-    try:
-        service.unlink_document_from_corpus(db, user.id, document_id, corpus_id)
-    except service.DocumentNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except service.CorpusNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except service.DocumentNotInCorpusError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc

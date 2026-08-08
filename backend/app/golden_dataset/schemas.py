@@ -17,6 +17,10 @@ class CandidateOut(BaseModel):
     content: str
     matchedQuestion: bool
     matchedAnswer: bool
+    # Raw cosine similarity from whichever search matched this chunk (question preferred over
+    # answer when both matched) — distinct from the RRF score used to rank/merge candidates,
+    # which is a fused rank score, not a similarity value (033-ui-ux-polish).
+    score: float
 
 
 class CandidateSearchResponse(BaseModel):
